@@ -201,7 +201,7 @@ class Collection(object):
     def _columns(self):
         return [x[1] for x in self.database("PRAGMA table_info(%s)"%self.name)]
 
-    def find(self, query=None, fields=None, _limit=100, **kwds):
+    def find(self, query=None, fields=None, limit=None, offset=0, batch_size=50, **kwds):
         if fields is None:
             cmd = 'SELECT rowid,* FROM %s'%self.name
         else:
@@ -217,16 +217,29 @@ class Collection(object):
                     query = ' %s=%r '%(key, val)
         if query is not None:
             cmd += ' WHERE %s'%query
-        if _limit is not None:
-            cmd += ' LIMIT %s'%int(_limit)
-        #print cmd
-        v = self.database(cmd)
-        if fields is None:
-            columns = self._columns()
+
+        batch_size = int(batch_size)
+        
+        if limit is not None:
+            cmd += ' LIMIT %s'%int(limit)
         else:
-            columns = fields
-        columns = ['rowid'] + columns
-        return [dict([a for a in zip(columns, x) if a[1] is not None]) for x in v]
+            cmd += ' LIMIT %s'%batch_size
+        if offset is not None:
+            cmd += ' OFFSET %s'%int(offset)
+        while True:
+            v = self.database(cmd)
+            if fields is None:
+                columns = self._columns()
+            else:
+                columns = fields
+            columns = ['rowid'] + columns
+            for x in v:
+                yield dict([a for a in zip(columns, x) if a[1] is not None])
+            if limit is not None or len(v) == 0:
+                return
+            i = cmd.rfind('OFFSET')
+            offset += batch_size
+            cmd = cmd[:i] + 'OFFSET %s'%offset
         
 
 
