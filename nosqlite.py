@@ -96,11 +96,17 @@ class Database(object):
         self.client = client
         self.name = str(name)
 
+    def vacuum(self):
+        self('vacuum')
+
     def __call__(self, cmds, t=None, many=False, coerce=True):
         return self.client(cmds, t, file=self.name, many=many, coerce=coerce)
 
     def __getattr__(self, name):
         return Collection(self, name)
+
+    def trait_names(self):
+        return [C.name for C in self.collections()]
 
     def __repr__(self):
         return "Database '%s'"%self.name
@@ -220,7 +226,17 @@ class Collection(object):
     ###############################################################
     # Importing and exporting data in various formats
     ###############################################################
-    def export_csv(self, csvfile, delimiter=' ', quotechar='|', order_by=None):
+    def export_csv(self, csvfile, delimiter=' ', quotechar='|', order_by=None, write_columns=True):
+        """
+        Export all documents in self to the given csvfile.  The first row
+        of the cvsfile will be headers that specify the keys.
+
+        INPUT:
+        - csvfile -- string or readable file
+        - delimiter -- string (default: ' ')
+        - quotechar -- string (default: '|')
+        - order_by -- string (default: None)
+        """
         if isinstance(csvfile, str):
             csvfile = open(csvfile, 'wb')
         import csv
@@ -228,11 +244,45 @@ class Collection(object):
         cmd = 'SELECT * FROM %s '%self.name
         if order_by is not None:
             cmd += ' ORDER BY %s'%order_by
+        if write_columns:
+            W.writerow(self.columns())
         for x in self.database(cmd):
-            W.writerow(x)
+            W.writerow(['%r'%a for a in x])
 
-    def import_csv(self, sep):
-        raise NotImplementedError
+    def import_csv(self, csvfile, columns=None, delimiter=' ', quotechar='|'):
+        """
+        Import data into self from the given csvfile.  If columns is
+        None, then the first row of the cvsfile must be headers that
+        specify the keys.  If columns is not None, then the first row
+        is assumed to be data. 
+
+        INPUT:
+        - csvfile -- string or readable file
+        - delimiter -- string (default: ' ')
+        - quotechar -- string (default: '|')
+        - columns -- None or list of strings (column headings)
+        """
+        if isinstance(csvfile, str):
+            csvfile = open(csvfile, 'rb')
+        import csv
+        R = csv.reader(csvfile, delimiter=delimiter, quotechar=quotechar)
+        if columns is None:
+            columns = R.next()
+        d = []
+        for x in R:
+            z = {}
+            for i in range(len(x)):
+                y = x[i]
+                if y != '':
+                    if y.isdigit():
+                        y = eval(y)
+                    else:
+                        v = y.split('.')
+                        if len(v) == 2 and v[0].isdigit() and v[1].isdigit():
+                            y = eval(y)
+                    z[columns[i]] = y
+            d.append(z)
+        self.insert(d)
 
     ###############################################################
     # Deleting documents
@@ -323,7 +373,7 @@ class Collection(object):
                     query = ' %s=%r '%(key, val)
         return ' WHERE ' + query if query else ''
 
-    def find(self, query='', fields=None, limit=None, offset=0, batch_size=50, _rowid=True, **kwds):
+    def find(self, query='', fields=None, limit=None, offset=0, order_by=None, batch_size=50, _rowid=False, **kwds):
         cmd = 'SELECT rowid,' if _rowid else 'SELECT '
         if fields is None:
             cmd += '* FROM %s'%self.name
@@ -333,6 +383,9 @@ class Collection(object):
             cmd += '%s FROM %s'%(','.join(fields), self.name)
 
         cmd += self._where_clause(query, kwds)
+
+        if order_by is not None:
+            cmd += ' ORDER BY %s '%order_by
 
         batch_size = int(batch_size)
         
