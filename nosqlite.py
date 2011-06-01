@@ -201,7 +201,21 @@ class Collection(object):
     ###############################################################
     # Updating documents
     ###############################################################
-    # not done yet
+    #, order_by=None, limit=None, offset=0,   # -- seems not supported.
+    def update(self, d, query='', **kwds):
+        t = tuple([self.database.client._coerce_(x) for x in d.values()])
+        s = ','.join(['%s=? '%x for x in d.keys()])
+        cmd = "UPDATE %s SET %s %s"%(
+            self.name, s, self._where_clause(query, kwds))
+##         if order_by is not None:
+##             cmd += ' ORDER BY %s'%order_by
+##         if limit is not None:
+##             if order_by is None:
+##                 # arbitrary choice
+##                 cmd += ' ORDER BY %s'%d.keys()[0]
+##             cmd += ' LIMIT %s OFFSET %s'%(limit, offset)
+        self.database(cmd, t)
+        
     
     ###############################################################
     # Importing and exporting data in various formats
@@ -294,15 +308,14 @@ class Collection(object):
                     query = ' %s=%r '%(key, val)
         return ' WHERE ' + query if query else ''
 
-    def find(self, query='', fields=None, limit=None, offset=0, batch_size=50, rowid=True, **kwds):
-        cmd = 'SELECT rowid,' if rowid else 'SELECT '
+    def find(self, query='', fields=None, limit=None, offset=0, batch_size=50, _rowid=True, **kwds):
+        cmd = 'SELECT rowid,' if _rowid else 'SELECT '
         if fields is None:
             cmd += '* FROM %s'%self.name
         else:
             if isinstance(fields, str):
                 fields = [fields]
             cmd += '%s FROM %s'%(','.join(fields), self.name)
-        print cmd
 
         cmd += self._where_clause(query, kwds)
 
@@ -320,7 +333,7 @@ class Collection(object):
                 columns = self._columns()
             else:
                 columns = fields
-            columns = (['rowid'] if rowid else []) + columns
+            columns = (['rowid'] if _rowid else []) + columns
             for x in v:
                 yield dict([a for a in zip(columns, x) if a[1] is not None])
             if limit is not None or len(v) == 0:
