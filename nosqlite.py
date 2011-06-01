@@ -220,8 +220,16 @@ class Collection(object):
     ###############################################################
     # Importing and exporting data in various formats
     ###############################################################
-    def export_csv(self, sep):
-        raise NotImplementedError
+    def export_csv(self, csvfile, delimiter=' ', quotechar='|', order_by=None):
+        if isinstance(csvfile, str):
+            csvfile = open(csvfile, 'wb')
+        import csv
+        W = csv.writer(csvfile, delimiter=delimiter, quotechar=quotechar, quoting=csv.QUOTE_MINIMAL)
+        cmd = 'SELECT * FROM %s '%self.name
+        if order_by is not None:
+            cmd += ' ORDER BY %s'%order_by
+        for x in self.database(cmd):
+            W.writerow(x)
 
     def import_csv(self, sep):
         raise NotImplementedError
@@ -230,7 +238,11 @@ class Collection(object):
     # Deleting documents
     ###############################################################
     def delete(self, query='', **kwds):
-        cmd = "DELETE FROM %s %s"%(self.name, self._where_clause(query, kwds))
+        if not query and len(kwds) == 0:
+            # just drop the table
+            cmd = "DROP TABLE %s"%self.name
+        else:
+            cmd = "DELETE FROM %s %s"%(self.name, self._where_clause(query, kwds))
         self.database(cmd)
 
     ###############################################################
@@ -279,6 +291,9 @@ class Collection(object):
 
     def _columns(self):
         return [x[1] for x in self.database("PRAGMA table_info(%s)"%self.name)]
+
+    def columns(self):
+        return [x for x in self._columns() if x != 'rowid']
 
     def _add_columns(self, new_columns):
         for col in new_columns:
