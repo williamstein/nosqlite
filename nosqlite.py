@@ -24,8 +24,8 @@ class Server(object):
         server = SimpleXMLRPCServer.SimpleXMLRPCServer(
             (self.address, self.port), allow_none=True)
 
-        def execute(cmds, t, file='default'):
-            db = self.db(os.path.join(self.directory, file))
+        def execute(cmds, t, file='default', many=False):
+            db = self.db(os.path.join(self.directory, file) if file != ':memory:' else file)
             cursor = db.cursor()
             if isinstance(cmds, str):
                 if t is not None:
@@ -35,7 +35,7 @@ class Server(object):
             v = []
             for c in cmds:
                 if isinstance(c, tuple):
-                    o = cursor.execute(*c)
+                    o = cursor.executemany(*c) if many else cursor.execute(*c)
                 else:
                     o = cursor.execute(c)
                 v.extend(list(o))
@@ -43,6 +43,7 @@ class Server(object):
             return v
 
         server.register_function(execute, 'execute')
+        print self
         server.serve_forever()
 
     def __repr__(self):
@@ -66,12 +67,20 @@ class Client(object):
     def __repr__(self):
         return "noSQLite client http://%s:%s"%(self.address, self.port)
         
-    def __call__(self, cmds, t=None, file='default', coerce=True):
-        if t is not None and coerce:
-            t = tuple([self._coerce_(x) for x in t])
-        return self.server.execute(cmds, t, file)
+    def __call__(self, cmd, t=None, file='default', many=False, coerce=True):
+        if not isinstance(cmd, str):
+            raise TypeError, "cmd (=%s) must be a string"%cmd
+        if coerce:
+            if many:
+                t = [tuple([self._coerce_(x) for x in y]) for y in t]
+            else:
+                if t is not None:
+                    t = tuple([self._coerce_(x) for x in t])
+        return self.server.execute(cmd, t, file, many)
     
     def __getattr__(self, name):
+        if name == 'memory':
+            name = ':memory:'
         return Database(self, name)
 
     def _coerce_(self, x):
@@ -87,8 +96,8 @@ class Database(object):
         self.client = client
         self.name = str(name)
 
-    def __call__(self, cmds, t=None):
-        return self.client(cmds, t)
+    def __call__(self, cmds, t=None, many=False, coerce=True):
+        return self.client(cmds, t, file=self.name, many=many, coerce=coerce)
 
     def __getattr__(self, name):
         return Collection(self, name)
@@ -109,50 +118,106 @@ class Collection(object):
         return "Collection '%s'"%self.name
 
     def __len__(self):
-        cmd = "SELECT COUNT(*) FROM %s"%self.name
-        return int(self.database(cmd)[0][0])
+        try:
+            cmd = "SELECT COUNT(*) FROM %s"%self.name
+            return int(self.database(cmd)[0][0])
+        except xmlrpclib.Fault:
+            if len(self._columns()) == 0:
+                return 0
+            raise
 
+    def _create(self, columns):
+        self.database("CREATE TABLE %s (%s)"%(self.name, ', '.join(columns)))
+        
     ###############################################################
-    # Inserting documents
+    # Inserting documents: one at a time or in a batch
     ###############################################################
-    def insert(self, d):
+    def insert(self, d, coerce=True):
+        """
+        INPUT:
+        - d -- dict (single document) or list of dict's
+        - coerce -- whether to coerce values
+        """
         # Make sure that the keys of d are a subset of the columns of
         # the corresponding table.  If not, expand that table by
         # adding a new column, which is the one thing we can do
-        # to change a table in sqlite!  http://www.sqlite.org/lang_altertable.html
-        
-        if instance(d, list):
-            # for this will need to:
-            #  1. compute union of keys of all dicts in d
-            #  2. ensure all columns present in database
-            #  3. do the whole insert very efficiently.
-            raise NotImplementedError
-        
-        cmd = 'INSERT INTO %s (%s) VALUES(%s)'%(
-            self.name, ','.join(d.keys()), ','.join(['?']*len(d.keys())))
-        t = d.values()
-        while True:
-            try:
-                #print 'trying: ', cmd
-                self.database(cmd, t)
-                return
-            except xmlrpclib.Fault, e:
-                s = e.faultString
-                if len(d.keys()) == 0:
-                    raise ValueError, "d must have at least one key"
-                if ':no such table:' in s:
-                    c = "CREATE TABLE %s (%s)"%(self.name, ', '.join(d.keys()))
-                    #print c
-                    self.database(c)
-                elif 'has no column named' in s:
-                    # be "evil" for a moment
-                    i = s.rfind('named ')
-                    column = s[i+6:]
-                    c = "ALTER TABLE %s ADD COLUMN %s"%(self.name, column)
-                    # print c
-                    self.database(c)
-                else:
-                    raise e
+        # to change a table in sqlite!
+        if isinstance(d, list):
+            keys = set().union(*d)
+        else:
+            keys = set(d.keys())
+        current_cols = self._columns()
+        new_columns = keys.difference(current_cols)
+        if len(current_cols) == 0:
+            # table doesn't exist yet
+            self._create(new_columns)
+        else:
+            # table exists -- add any new columns to it (usually new_columns is empty)
+            self._add_columns(new_columns)
+
+        if isinstance(d, list):
+            # batch insert.  Since the keys in the dictionaries in d can vary, we
+            # group d into a list of sublists with constant keys.   Then each of
+            # these get inserted using SQL's executemany.
+            for v in _constant_key_grouping(d):
+                cmd = _insert_statement(self.name, v[0].keys())
+                self.database(cmd, [x.values() for x in v], many=True, coerce=coerce)
+            
+        else:
+            # individual insert
+            self.database(_insert_statement(self.name, d.keys()), d.values(), coerce=coerce)
+
+
+    ###############################################################
+    # Copy collection
+    ###############################################################
+    def copy(self, collection, query='', fields=None, **kwds):
+        """
+        Efficiently copies documents from self into the given collection.
+
+        INPUT:
+        - collection -- a Collection or string (that names a collection).
+        """
+        if isinstance(collection, str):
+            collection = self.database.__getattr__(collection)
+        # which columns we want to copy
+        fields = self._columns() if fields is None else fields
+        # which are already in other collection
+        other = collection._columns()
+        # which are missing
+        cols = set(fields).difference(other)
+        if len(other) == 0:
+            # other collection hasn't been created yet
+            collection._create(cols)
+        if cols:
+            # need to add some columns to other collection
+            collection._add_columns(cols)
+        # now recipient table has all needed columns, so do the insert in one go.
+        c = ','.join(fields)
+        cmd = "INSERT INTO %s (%s) SELECT %s FROM %s %s"%(
+            collection.name, c, c, self.name, self._where_clause(query, kwds))
+        self.database(cmd)
+
+    ###############################################################
+    # Updating documents
+    ###############################################################
+    # not done yet
+    
+    ###############################################################
+    # Importing and exporting data in various formats
+    ###############################################################
+    def export_csv(self, sep):
+        raise NotImplementedError
+
+    def import_csv(self, sep):
+        raise NotImplementedError
+
+    ###############################################################
+    # Deleting documents
+    ###############################################################
+    def delete(self, query='', **kwds):
+        cmd = "DELETE FROM %s %s"%(self.name, self._where_clause(query, kwds))
+        self.database(cmd)
 
     ###############################################################
     # Indexes: creation, dropping, listing
@@ -201,22 +266,45 @@ class Collection(object):
     def _columns(self):
         return [x[1] for x in self.database("PRAGMA table_info(%s)"%self.name)]
 
-    def find(self, query=None, fields=None, limit=None, offset=0, batch_size=50, **kwds):
-        if fields is None:
-            cmd = 'SELECT rowid,* FROM %s'%self.name
-        else:
-            if isinstance(fields, str):
-                fields = [fields]
-            cmd = 'SELECT rowid,%s FROM %s'%(','.join(fields), self.name)
+    def _add_columns(self, new_columns):
+        for col in new_columns:
+            try:
+                self.database("ALTER TABLE %s ADD COLUMN %s"%(self.name, col))
+            except xmlrpclib.Fault:
+                # TODO: make it into a single transaction...
+                # The above could safely fail if another client tried
+                # to add at the same time and made the relevant
+                # column. Ignore error here and deal with it later.
+                pass
+
+
+    def find_one(self, *args, **kwds):
+        v = list(self.find(*args, limit=1, **kwds))
+        if len(v) == 0:
+            raise ValueError, "found nothing"
+        return v[0]
+        
+    def _where_clause(self, query, kwds):
         if len(kwds) > 0:
             for key, val in kwds.iteritems():
                 val = self.database.client._coerce_(val)
-                if query is not None:
+                if query:
                     query += ' AND %s=%r '%(key, val)
                 else:
                     query = ' %s=%r '%(key, val)
-        if query is not None:
-            cmd += ' WHERE %s'%query
+        return ' WHERE ' + query if query else ''
+
+    def find(self, query='', fields=None, limit=None, offset=0, batch_size=50, rowid=True, **kwds):
+        cmd = 'SELECT rowid,' if rowid else 'SELECT '
+        if fields is None:
+            cmd += '* FROM %s'%self.name
+        else:
+            if isinstance(fields, str):
+                fields = [fields]
+            cmd += '%s FROM %s'%(','.join(fields), self.name)
+        print cmd
+
+        cmd += self._where_clause(query, kwds)
 
         batch_size = int(batch_size)
         
@@ -232,7 +320,7 @@ class Collection(object):
                 columns = self._columns()
             else:
                 columns = fields
-            columns = ['rowid'] + columns
+            columns = (['rowid'] if rowid else []) + columns
             for x in v:
                 yield dict([a for a in zip(columns, x) if a[1] is not None])
             if limit is not None or len(v) == 0:
@@ -242,4 +330,44 @@ class Collection(object):
             cmd = cmd[:i] + 'OFFSET %s'%offset
         
 
+def _insert_statement(table, cols):
+    """
+    Return SQLite INSERT statement template for inserting the columns
+    into the given table.
+    
+    INPUT:
+    - table -- name of a SQLite table
+    - cols -- list of strings
 
+    EXAMPLES::
+
+        sage: from nosqlite import _insert_statement
+        sage: _insert_statement('table_name', ['col1', 'col2', 'col3'])
+        'INSERT INTO table_name (col1,col2,col3) VALUES(?,?,?)'
+    """
+    return 'INSERT INTO %s (%s) VALUES(%s)'%(table, ','.join(cols), ','.join(['?']*len(cols)))
+
+def _constant_key_grouping(d):
+    """
+    Group the list d into a list of sublists with constant keys.
+    
+    INPUT:
+    - d -- a list of dictionaries
+    OUTPUT:
+    - a list of lists of dictionaries with constant keys
+
+    EXAMPLES::
+
+        sage: from nosqlite import _constant_key_grouping
+        sage: _constant_key_grouping([{'a':5,'b':7}, {'a':10,'c':4}, {'a':5, 'b':8}])
+        [[{'a': 5, 'b': 7}, {'a': 5, 'b': 8}], [{'a': 10, 'c': 4}]]
+    """
+    x = {}
+    for a in d:
+        k = tuple(a.keys())
+        if x.has_key(k):
+            x[k].append(a)
+        else:
+            x[k] = [a]
+    return x.values()
+    
