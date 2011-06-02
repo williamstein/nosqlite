@@ -7,6 +7,8 @@ LICENSE: Modified BSD
 """
 
 import os
+import shutil
+import tempfile
 
 # Database
 import sqlite3
@@ -77,11 +79,24 @@ class VerifyingServer(SocketServer.ForkingMixIn,
         return username == self.username and password == self.password
 
 class Server(object):
+    """
+    The noSQLite server object.  Create an instance of this object to
+    start a server. 
+
+        sage: s = Server(test=True)
+    """
     def __init__(self,
                  username='username', password='password',
                  directory='nosqlite.db',
                  address="localhost", port=8100,
-                 auto_run=True):
+                 auto_run = True,
+                 test = False,
+                 verbose = True):
+        self.test = test
+        if test:
+            verbose = False
+            directory = tempfile.mkdtemp()
+        self.verbose = verbose
         self.directory = str(directory)
         self.username = username
         self.password = password
@@ -90,8 +105,15 @@ class Server(object):
         self.address = str(address)
         self.port = int(port)
         self._dbs = {}
-        if auto_run:
+        if not self.test and auto_run:
             self.run()
+
+    def __del__(self):
+        try:
+            self.stop()
+        finally:
+            if hasattr(self, 'test') and self.test:
+                shutil.rmtree(self.directory, ignore_errors=True)
 
     def db(self, file):
         try:
@@ -100,6 +122,9 @@ class Server(object):
             db = sqlite3.connect(file)
             self._dbs[file] = db
             return db
+
+    def stop(self):
+        os.kill(self.pid, 9)
 
     def run(self, max_tries=100):
         port = self.port
@@ -112,12 +137,19 @@ class Server(object):
                 success = True
                 break
             except socket.error, e:
-                print "Port %s is unavailable."%port
+                if self.verbose:
+                    print "Port %s is unavailable."%port
                 port += 1
 
         if not success:
             raise RuntimeError, "Unable to find an open port."
 
+        pid = os.fork()
+        if pid != 0:
+            self.pid = pid
+            self.port = port
+            return port
+        
         def execute(cmds, t, file='default', many=False):
             db = self.db(os.path.join(self.directory, file) if file != ':memory:' else file)
             cursor = db.cursor()
@@ -136,24 +168,26 @@ class Server(object):
             db.commit()
             return v
 
-        fqdn = socket.getfqdn()
-        print "\n"
-        print "-"*70
-        print "noSQLite serving '%s/'."%os.path.abspath(self.directory),
-        print "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(port, self.username),
-        if self.address != 'localhost':
-            print ", '%s')"%self.address
-        else:
-            print ")"
-        print ""
-        if self.address == 'localhost':
-            print "To securely connect from a remote client, setup an ssh tunnel by"
-            print "typing on the client:\n"
-            print "\tssh -L %s:localhost:%s %s"%(port, port, fqdn)
-            print "\nthen\n"
-            print "\tclient(%s, '%s', 'xxx')"%(port, self.username)
-        print "\nPress control-c to terminate server or kill pid %s."%os.getpid()
-        print "-"*70
+        if self.verbose:
+            fqdn = socket.getfqdn()
+            print "\n"
+            print "-"*70
+            print "noSQLite serving '%s/'."%os.path.abspath(self.directory),
+            print "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(port, self.username),
+            if self.address != 'localhost':
+                print ", '%s')"%self.address
+            else:
+                print ")"
+            print ""
+            if self.address == 'localhost':
+                print "To securely connect from a remote client, setup an ssh tunnel by"
+                print "typing on the client:\n"
+                print "\tssh -L %s:localhost:%s %s"%(port, port, fqdn)
+                print "\nthen\n"
+                print "\tclient(%s, '%s', 'xxx')"%(port, self.username)
+            print "\nDelete server object to terminate server or kill pid %s."%os.getpid()
+            print "-"*70
+            
         server.register_function(execute, 'execute')
         server.serve_forever()
         
