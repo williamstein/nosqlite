@@ -1,23 +1,62 @@
 """
+NoSQLite is a lightweight zeroconf noSQL document-oriented forking
+Python SQLite networked authenticated XMLRPC database server.
 
-TODO:
-
-   [ ] authentication
-   [ ] test suite (mostly using in-memory sqlite server?)
+AUTHOR: (c) William Stein, 2011
+LICENSE: Modified BSD
 """
 
-
 import os
-import SimpleXMLRPCServer
 import sqlite3
 import xmlrpclib
 import cPickle
 import base64
 import zlib
+import SocketServer
+from SimpleXMLRPCServer import (SimpleXMLRPCServer,
+                                SimpleXMLRPCRequestHandler)
+
+# http://code.activestate.com/recipes/81549-a-simple-xml-rpc-server/
+# See http://www.acooke.org/cute/BasicHTTPA0.html for this recipe.
+class VerifyingServer(SocketServer.ForkingMixIn,
+                      SimpleXMLRPCServer):
+    def __init__(self, username, password, *args, **kargs):
+        self.username = username
+        self.password = password
+        # we use an inner class so that we can call out to the
+        # authenticate method
+        class VerifyingRequestHandler(SimpleXMLRPCRequestHandler):
+            # this is the method we must override
+            def parse_request(myself):
+                # first, call the original implementation which returns
+                # True if all OK so far
+                if SimpleXMLRPCRequestHandler.parse_request(myself):
+                    # next we authenticate
+                    if self.authenticate(myself.headers):
+                        return True
+                    else:
+                        # if authentication fails, tell the client
+                        myself.send_error(401, 'Authentication failed')
+                return False
+        # and intialise the superclass with the above
+        SimpleXMLRPCServer.__init__(self,
+                                    requestHandler=VerifyingRequestHandler,
+                                    *args, **kargs)
+
+    def authenticate(self, headers):
+        (basic, _, encoded) = \
+                headers.get('Authorization').partition(' ')
+        assert basic == 'Basic', 'Only basic authentication supported'
+        (username, _, password) = base64.b64decode(encoded).partition(':')
+        return username == self.username and password == self.password
 
 class Server(object):
-    def __init__(self, directory='/tmp/db', address="localhost", port=8100):
+    def __init__(self, directory='/tmp/db',
+                 address="localhost", port=8100,
+                 username='username', password='password'):
         self.directory = str(directory)
+        self.username = username
+        self.password = password
         if not os.path.exists(directory):
             os.makedirs(directory)
         self.address = str(address)
@@ -33,7 +72,8 @@ class Server(object):
             return db
 
     def run(self):
-        server = SimpleXMLRPCServer.SimpleXMLRPCServer(
+        server = VerifyingServer(
+            self.username, self.password,
             (self.address, self.port), allow_none=True)
 
         def execute(cmds, t, file='default', many=False):
@@ -69,10 +109,12 @@ except:
     is_RealNumber = lambda x: False
 
 class Client(object):
-    def __init__(self, address="localhost", port=8100):
+    def __init__(self, address="localhost", port=8100,
+                 username='username', password='password'):
         self.address = str(address)
         self.port = port
-        self.server = xmlrpclib.Server('http://%s:%s'%(address, port),
+        self.server = xmlrpclib.Server('http://%s:%s@%s:%s'%
+                   (username, password, address, port),
                                        allow_none=True)
 
     def __repr__(self):
@@ -100,7 +142,7 @@ class Client(object):
         elif isinstance(x, (str, int, long, float)):
             pass
         elif is_Integer(x) and x.nbits()<32:
-            n = int(x)
+            x = int(x)
         elif is_RealNumber(x) and x.prec()==53:
             return float(x)
         else:
