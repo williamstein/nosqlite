@@ -3,9 +3,6 @@
 TODO:
 
    [ ] authentication
-   [ ] make a converter mode for clients (on by default):
-         (1) string or convertible-to-int or float or bool just converts.
-         (2) anything else gets pickled.
    [ ] test suite (mostly using in-memory sqlite server?)
 """
 
@@ -14,6 +11,9 @@ import os
 import SimpleXMLRPCServer
 import sqlite3
 import xmlrpclib
+import cPickle
+import base64
+import zlib
 
 class Server(object):
     def __init__(self, directory='/tmp/db', address="localhost", port=8100):
@@ -95,10 +95,21 @@ class Client(object):
         return Database(self, name)
 
     def _coerce_(self, x):
-        if is_Integer(x):
+        if isinstance(x, bool):
             x = int(x)
-        elif is_RealNumber(x):
-            x = float(x)
+        elif isinstance(x, (str, int, long, float)):
+            pass
+        elif is_Integer(x) and x.nbits()<32:
+            n = int(x)
+        elif is_RealNumber(x) and x.prec()==53:
+            return float(x)
+        else:
+            x = '__pickle' + base64.b64encode(zlib.compress(cPickle.dumps(x, 2)))
+        return x
+
+    def _coerce_back_(self, x):
+        if isinstance(x, str) and x.startswith('__pickle'):
+            return cPickle.loads(zlib.decompress(base64.b64decode(x[8:])))
         return x
 
 class Database(object):
@@ -131,7 +142,7 @@ class Collection(object):
         self.name = str(name)
 
     def __repr__(self):
-        return "Collection '%s'"%self.name
+        return "Collection '%s.%s'"%(self.database.name, self.name)
 
     def __len__(self):
         try:
@@ -381,8 +392,10 @@ class Collection(object):
                 # column. Ignore error here and deal with it later.
                 pass
 
-
     def find_one(self, *args, **kwds):
+        """
+        Return first document that match the given query.
+        """
         v = list(self.find(*args, limit=1, **kwds))
         if len(v) == 0:
             raise ValueError, "found nothing"
@@ -392,16 +405,18 @@ class Collection(object):
         if len(kwds) > 0:
             for key, val in kwds.iteritems():
                 val = self.database.client._coerce_(val)
+                
                 if query:
                     query += ' AND %s=%r '%(key, val)
                 else:
                     query = ' %s=%r '%(key, val)
         return ' WHERE ' + query if query else ''
 
-    def find(self, query='', fields=None, limit=None, offset=0, order_by=None, batch_size=50, _rowid=False, **kwds):
+    def _find_cmd(self, query='', fields=None, limit=None, offset=0, order_by=None, batch_size=50, _rowid=False, _count=False, **kwds):
         cmd = 'SELECT rowid,' if _rowid else 'SELECT '
+        cmd += 'COUNT(*) ' if _count else ' * '
         if fields is None:
-            cmd += '* FROM %s'%self.name
+            cmd += ' FROM %s'%self.name
         else:
             if isinstance(fields, str):
                 fields = [fields]
@@ -420,6 +435,23 @@ class Collection(object):
             cmd += ' LIMIT %s'%batch_size
         if offset is not None:
             cmd += ' OFFSET %s'%int(offset)
+
+        return cmd
+
+    def count(self, *args, **kwds):
+        """
+        Return the number of documents that match a given find query.
+        """
+        kwds['_count'] = True
+        cmd = self._find_cmd(*args, **kwds)
+        return self.database(cmd)[0]
+
+    def find(self, query='', fields=None, _rowid=False, **kwds):
+        """
+        Return iteratoe over all documents that match the given query.
+        """
+        cmd = self._find_cmd(query=query, fields=fields, _rowid=_rowid, **kwds)
+        convert = self.database.client._coerce_back_
         while True:
             v = self.database(cmd)
             if fields is None:
@@ -428,7 +460,8 @@ class Collection(object):
                 columns = fields
             columns = (['rowid'] if _rowid else []) + columns
             for x in v:
-                yield dict([a for a in zip(columns, x) if a[1] is not None])
+                yield dict([a for a in zip(columns, [convert(y) for y in x])
+                            if a[1] is not None])
             if limit is not None or len(v) == 0:
                 return
             i = cmd.rfind('OFFSET')
