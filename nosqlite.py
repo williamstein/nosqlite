@@ -454,7 +454,8 @@ class Collection(object):
                     query = ' %s=%r '%(key, val)
         return ' WHERE ' + query if query else ''
 
-    def _find_cmd(self, query='', fields=None, limit=None, offset=0, order_by=None, batch_size=50, _rowid=False, _count=False, **kwds):
+    def _find_cmd(self, query='', fields=None, limit=None, offset=0,
+                  order_by=None, batch_size=50, _rowid=False, _count=False, **kwds):
         cmd = 'SELECT rowid,' if _rowid else 'SELECT '
         cmd += 'COUNT(*) ' if _count else ' * '
         if fields is None:
@@ -488,11 +489,14 @@ class Collection(object):
         cmd = self._find_cmd(*args, **kwds)
         return self.database(cmd)[0]
 
-    def find(self, query='', fields=None, _rowid=False, **kwds):
+    def find(self, query='', fields=None, batch_size=50,
+             _rowid=False, limit=None, offset=0, **kwds):
         """
         Return iteratoe over all documents that match the given query.
         """
-        cmd = self._find_cmd(query=query, fields=fields, _rowid=_rowid, **kwds)
+        cmd = self._find_cmd(query=query, fields=fields, batch_size=batch_size,
+                             _rowid=_rowid,
+                             limit=limit, offset=offset, **kwds)
         convert = self.database.client._coerce_back_
         while True:
             v = self.database(cmd)
