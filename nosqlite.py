@@ -1,3 +1,15 @@
+"""
+
+TODO:
+
+   [ ] authentication
+   [ ] make a converter mode for clients (on by default):
+         (1) string or convertible-to-int or float or bool just converts.
+         (2) anything else gets pickled.
+   [ ] test suite (mostly using in-memory sqlite server?)
+"""
+
+
 import os
 import SimpleXMLRPCServer
 import sqlite3
@@ -49,7 +61,6 @@ class Server(object):
     def __repr__(self):
         return "noSQLite server http://%s:%s"%(self.address, self.port)
 
-
 ################## something for sage
 try:
     from sage.rings.all import is_Integer, is_RealNumber
@@ -89,7 +100,6 @@ class Client(object):
         elif is_RealNumber(x):
             x = float(x)
         return x
-        
 
 class Database(object):
     def __init__(self, client, name):
@@ -175,11 +185,23 @@ class Collection(object):
 
 
     ###############################################################
-    # Copy collection
+    # Copy or rename a collection
     ###############################################################
+    def rename(self, new_name):
+        """
+        Rename this collection to the given new name.
+        
+        INPUT:
+        - new_name -- string
+        """
+        cmd = "ALTER TABLE %s RENAME TO %s"%(self.name, new_name)
+        self.database(cmd)
+        self.name = new_name
+    
     def copy(self, collection, query='', fields=None, **kwds):
         """
-        Efficiently copies documents from self into the given collection.
+        Copy documents from self into the given collection.  The query
+        and fields are specified exactly as for the find command.
 
         INPUT:
         - collection -- a Collection or string (that names a collection).
@@ -305,9 +327,12 @@ class Collection(object):
         index_name = 'idx___%s___%s'%(self.name, cols.replace(',','___').replace(' ',''))
         return cols, index_name
 
-    def ensure_index(self, **kwds):
+    def ensure_index(self, unique=None, **kwds):
+        if len(kwds) == 0:
+            raise ValueError, "must specify some keys"
         cols, index_name = self._index_pattern(kwds)
-        cmd = "CREATE INDEX IF NOT EXISTS %s ON %s(%s)"%(index_name, self.name, cols)
+        cmd = "CREATE %s INDEX IF NOT EXISTS %s ON %s(%s)"%(
+            'UNIQUE' if unique else '', index_name, self.name, cols)
         self.database(cmd)
 
     def drop_index(self, **kwds):
@@ -451,4 +476,8 @@ def _constant_key_grouping(d):
         else:
             x[k] = [a]
     return x.values()
-    
+
+# convenience for lower-case people    
+server = Server
+client = Client
+
