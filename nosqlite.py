@@ -7,14 +7,39 @@ LICENSE: Modified BSD
 """
 
 import os
+
+# Database
 import sqlite3
-import xmlrpclib
+
+# Object serialization
 import cPickle
 import base64
 import zlib
+
+# Simple forking XMLRPC server
+import xmlrpclib
 import SocketServer
-from SimpleXMLRPCServer import (SimpleXMLRPCServer,
-                                SimpleXMLRPCRequestHandler)
+import socket
+from SimpleXMLRPCServer import (SimpleXMLRPCServer, SimpleXMLRPCRequestHandler)
+
+# I also develop the Sage (http://sagemath.org) library, so personally
+# find having automatic support for Sage Integers and RealNumbers to
+# be very handy.  This will get ignored if you don't have Sage
+# installed.
+try:
+    from sage.rings.all import is_Integer, is_RealNumber
+except ImportError:
+    is_Integer = lambda x: False
+    is_RealNumber = lambda x: False
+
+
+###########################################################################
+# Server:
+#
+#   VerifyingServer -- a simple authenticated forking XMLRPC server.
+#       * authenticated -- so login/password is supported
+#       * forking -- so we can handle many simultaneous connections 
+###########################################################################
 
 # http://code.activestate.com/recipes/81549-a-simple-xml-rpc-server/
 # See http://www.acooke.org/cute/BasicHTTPA0.html for this recipe.
@@ -41,6 +66,7 @@ class VerifyingServer(SocketServer.ForkingMixIn,
         # and intialise the superclass with the above
         SimpleXMLRPCServer.__init__(self,
                                     requestHandler=VerifyingRequestHandler,
+                                    logRequests=False,
                                     *args, **kargs)
 
     def authenticate(self, headers):
@@ -51,9 +77,11 @@ class VerifyingServer(SocketServer.ForkingMixIn,
         return username == self.username and password == self.password
 
 class Server(object):
-    def __init__(self, directory='/tmp/db',
+    def __init__(self,
+                 username='username', password='password',
+                 directory='nosqlite.db',
                  address="localhost", port=8100,
-                 username='username', password='password'):
+                 auto_run=True):
         self.directory = str(directory)
         self.username = username
         self.password = password
@@ -62,6 +90,8 @@ class Server(object):
         self.address = str(address)
         self.port = int(port)
         self._dbs = {}
+        if auto_run:
+            self.run()
 
     def db(self, file):
         try:
@@ -71,10 +101,22 @@ class Server(object):
             self._dbs[file] = db
             return db
 
-    def run(self):
-        server = VerifyingServer(
-            self.username, self.password,
-            (self.address, self.port), allow_none=True)
+    def run(self, max_tries=100):
+        port = self.port
+        success = False
+        for i in range(max_tries):
+            try:
+                server = VerifyingServer(
+                    self.username, self.password,
+                    (self.address, port), allow_none=True)
+                success = True
+                break
+            except socket.error, e:
+                print "Port %s is unavailable."%port
+                port += 1
+
+        if not success:
+            raise RuntimeError, "Unable to find an open port."
 
         def execute(cmds, t, file='default', many=False):
             db = self.db(os.path.join(self.directory, file) if file != ':memory:' else file)
@@ -94,23 +136,45 @@ class Server(object):
             db.commit()
             return v
 
+        fqdn = socket.getfqdn()
+        print "\n"
+        print "-"*70
+        print "noSQLite serving '%s/'."%os.path.abspath(self.directory),
+        print "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(port, self.username),
+        if self.address != 'localhost':
+            print ", '%s')"%self.address
+        else:
+            print ")"
+        print ""
+        if self.address == 'localhost':
+            print "To securely connect from a remote client, setup an ssh tunnel by"
+            print "typing on the client:\n"
+            print "\tssh -L %s:localhost:%s %s"%(port, port, fqdn)
+            print "\nthen\n"
+            print "\tclient(%s, '%s', 'xxx')"%(port, self.username)
+        print "\nPress control-c to terminate server or kill pid %s."%os.getpid()
+        print "-"*70
         server.register_function(execute, 'execute')
-        print self
         server.serve_forever()
+        
 
     def __repr__(self):
         return "noSQLite server http://%s:%s"%(self.address, self.port)
 
-################## something for sage
-try:
-    from sage.rings.all import is_Integer, is_RealNumber
-except:
-    is_Integer = lambda x: False
-    is_RealNumber = lambda x: False
+
+###########################################################################
+# Client -- manages connections to the noSQLite server.
+#
+#  This is where all of the complicated logic is.
+#
+###########################################################################
+
+# see http://www.devpicayune.com/entry/200609191448
+socket.setdefaulttimeout(10)  
 
 class Client(object):
-    def __init__(self, address="localhost", port=8100,
-                 username='username', password='password'):
+    def __init__(self, port=8100, username='username', password='password',
+                 address="localhost"):
         self.address = str(address)
         self.port = port
         self.server = xmlrpclib.Server('http://%s:%s@%s:%s'%
@@ -201,20 +265,31 @@ class Collection(object):
     ###############################################################
     # Inserting documents: one at a time or in a batch
     ###############################################################
-    def insert(self, d, coerce=True):
+    def insert(self, d=None, coerce=True, **kwds):
         """
         INPUT:
         - d -- dict (single document) or list of dict's
         - coerce -- whether to coerce values
+        - kwds -- gets merged into d, providing a convenient shorthand
+          for inserting a document.
         """
+        if d is None:
+            d = kwds
+        elif isinstance(d, dict):
+            d.update(kwds)
+        else:
+            raise ValueError, "if kwds given, then d must be None or a dict"
+
         # Make sure that the keys of d are a subset of the columns of
         # the corresponding table.  If not, expand that table by
-        # adding a new column, which is the one thing we can do
-        # to change a table in sqlite!
+        # adding a new column, which is one thing we can easily do
+        # to change a table in sqlite.
+
         if isinstance(d, list):
             keys = set().union(*d)
         else:
             keys = set(d.keys())
+
         current_cols = self._columns()
         new_columns = keys.difference(current_cols)
         if len(current_cols) == 0:
@@ -224,6 +299,7 @@ class Collection(object):
             # table exists -- add any new columns to it (usually new_columns is empty)
             self._add_columns(new_columns)
 
+        # Now do the insert -- either batch or individual.
         if isinstance(d, list):
             # batch insert.  Since the keys in the dictionaries in d can vary, we
             # group d into a list of sublists with constant keys.   Then each of
@@ -282,22 +358,13 @@ class Collection(object):
     ###############################################################
     # Updating documents
     ###############################################################
-    #, order_by=None, limit=None, offset=0,   # -- seems not supported.
     def update(self, d, query='', **kwds):
         t = tuple([self.database.client._coerce_(x) for x in d.values()])
         s = ','.join(['%s=? '%x for x in d.keys()])
         cmd = "UPDATE %s SET %s %s"%(
             self.name, s, self._where_clause(query, kwds))
-##         if order_by is not None:
-##             cmd += ' ORDER BY %s'%order_by
-##         if limit is not None:
-##             if order_by is None:
-##                 # arbitrary choice
-##                 cmd += ' ORDER BY %s'%d.keys()[0]
-##             cmd += ' LIMIT %s OFFSET %s'%(limit, offset)
         self.database(cmd, t)
         
-    
     ###############################################################
     # Importing and exporting data in various formats
     ###############################################################
@@ -418,7 +485,10 @@ class Collection(object):
     ###############################################################
 
     def _columns(self):
-        return [x[1] for x in self.database("PRAGMA table_info(%s)"%self.name)]
+        a = self.database("PRAGMA table_info(%s)"%self.name)
+        if a is None:
+            return []
+        return [x[1] for x in a]
 
     def columns(self):
         return [x for x in self._columns() if x != 'rowid']
@@ -499,9 +569,12 @@ class Collection(object):
                              limit=limit, offset=offset, **kwds)
         convert = self.database.client._coerce_back_
         while True:
+            cols = self._columns()
+            if len(cols) == 0:  # table not yet created
+                return
             v = self.database(cmd)
             if fields is None:
-                columns = self._columns()
+                columns = cols
             else:
                 columns = fields
             columns = (['rowid'] if _rowid else []) + columns

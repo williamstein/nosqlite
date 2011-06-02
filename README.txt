@@ -33,7 +33,3 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
 
 -----------------------------------------------------------------
 
-NOTES:
-
-  * If we want to use HTTPS instead, see 
-    http://code.activestate.com/recipes/496786-simple-xml-rpc-server-over-https/
