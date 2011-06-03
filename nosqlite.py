@@ -105,6 +105,7 @@ class Server(object):
         >>> s
         nosqlite server object (not running)
     """
+    _test_mode = False
     def __init__(self,
                  username='username', password='password',
                  directory='nosqlite_db',
@@ -121,7 +122,7 @@ class Server(object):
           upon creation of the Server object.
         """
         self.pid = 0
-        self.test = _test_mode
+        self.test = self.__class__._test_mode
         if self.test:
             directory = tempfile.mkdtemp()
         self.directory = str(directory)
@@ -334,7 +335,7 @@ class Client(object):
         >>> s = server()
         >>> c = client(s.port)
         >>> c
-        nosqlite client connected to port 8120
+        nosqlite client connected to port ...
 
     We illustrate all options::
 
@@ -1248,10 +1249,10 @@ def _constant_key_grouping(d):
 server = Server
 client = Client
 
-
 # Doctesting
-_test_mode = False
-if __name__ == "__main__":
-    _test_mode = True
+if __name__ == '__main__':
     import doctest
-    doctest.testmod(optionflags=doctest.ELLIPSIS)
+    class TestServer(Server):
+        _test_mode = True
+    doctest.testmod(optionflags=doctest.ELLIPSIS,
+                    extraglobs={'server':TestServer, 'Server':TestServer})
