@@ -1250,7 +1250,7 @@ client = Client
 
 
 # Doctesting
-_test_mode = True
+_test_mode = False
 if __name__ == "__main__":
     _test_mode = True
     import doctest
