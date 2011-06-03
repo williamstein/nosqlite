@@ -489,9 +489,9 @@ class Client(object):
         """
         EXAMPLES::
 
-            sage: s = server(); c = client(s.port)
-            sage: z = c._coerce_([1,2])
-            sage: c._coerce_back_(z)
+            >>> s = server(); c = client(s.port)
+            >>> z = c._coerce_([1,2])
+            >>> c._coerce_back_(z)
             [1, 2]
         """
         if isinstance(x, str) and x.startswith('__pickle'):
@@ -507,14 +507,14 @@ class Database(object):
         """
         EXAMPLES::
 
-            sage: s = server(); c = client(s.port)
-            sage: db = c.database; db
+            >>> s = server(); c = client(s.port)
+            >>> db = c.database; db
             Database 'database'
-            sage: type(db)
+            >>> type(db)
             <class '__main__.Database'>
-            sage: db.client
+            >>> db.client
             nosqlite client connected to port ...
-            sage: db.name
+            >>> db.name
             'database'
         """
         self.client = client
@@ -528,8 +528,8 @@ class Database(object):
         
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: db.vacuum()
+            >>> s = server(); db = client(s.port).database
+            >>> db.vacuum()
         """
         self('vacuum')
 
@@ -541,9 +541,9 @@ class Database(object):
         
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: db.coll.insert([{'a':i} for i in range(6)])
-            sage: db('select count(*) from coll')
+            >>> s = server(); db = client(s.port).database
+            >>> db.coll.insert([{'a':i} for i in range(6)])
+            >>> db('select count(*) from coll')
             [[6]]
         """
         return self.client(cmds, t, file=self.name, many=many, coerce=coerce)
@@ -554,12 +554,12 @@ class Database(object):
         
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: c = db.coll; c
+            >>> s = server(); db = client(s.port).database
+            >>> c = db.coll; c
             Collection 'database.coll'
-            sage: type(c)
+            >>> type(c)
             <class '__main__.Collection'>
-            sage: db.__getattr__('coll')
+            >>> db.__getattr__('coll')
             Collection 'database.coll'
         """
         return Collection(self, name)
@@ -571,9 +571,9 @@ class Database(object):
         
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: db.col1.insert({'a':0}); db.my_col2.insert({'a':10})
-            sage: db.trait_names()
+            >>> s = server(); db = client(s.port).database
+            >>> db.col1.insert({'a':0}); db.my_col2.insert({'a':10})
+            >>> db.trait_names()
             ['col1', 'my_col2']
         """
         return [C.name for C in self.collections()]
@@ -582,7 +582,7 @@ class Database(object):
         """
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database; db.__repr__()
+            >>> s = server(); db = client(s.port).database; db.__repr__()
             "Database 'database'"
         """
         return "Database '%s'"%self.name
@@ -596,11 +596,11 @@ class Database(object):
         
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: db.col1.insert({'a':0}); db.my_col2.insert({'a':10})
-            sage: v = db.collections(); v
+            >>> s = server(); db = client(s.port).database
+            >>> db.col1.insert({'a':0}); db.my_col2.insert({'a':10})
+            >>> v = db.collections(); v
             [Collection 'database.col1', Collection 'database.my_col2']
-            sage: v[0].find_one()
+            >>> v[0].find_one()
             {'a': 0}
         """
         cmd = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -615,14 +615,14 @@ class Collection(object):
         
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: C = db.mycoll; C
+            >>> s = server(); db = client(s.port).database
+            >>> C = db.mycoll; C
             Collection 'database.mycoll'
-            sage: type(C)
+            >>> type(C)
             <class '__main__.Collection'>
-            sage: C.database
+            >>> C.database
             Database 'database'
-            sage: C.name
+            >>> C.name
             'mycoll'
         """
         self.database = database
@@ -632,8 +632,8 @@ class Collection(object):
         """
         EXAMPLES::
 
-            sage: s = server(); db = client(s.port).database
-            sage: C = db.mycoll; C.__repr__()
+            >>> s = server(); db = client(s.port).database
+            >>> C = db.mycoll; C.__repr__()
             "Collection 'database.mycoll'"
         """
         return "Collection '%s.%s'"%(self.database.name, self.name)
@@ -644,11 +644,11 @@ class Collection(object):
         
         EXAMPLES::
 
-            sage: s = server(); C = client(s.port).database.mycol
-            sage: len(C)
+            >>> s = server(); C = client(s.port).database.mycol
+            >>> len(C)
             0
-            sage: C.insert([{'a':i} for i in range(100)])
-            sage: len(C)
+            >>> C.insert([{'a':i} for i in range(100)])
+            >>> len(C)
             100
         """
         try:
@@ -668,18 +668,18 @@ class Collection(object):
 
         We illustrate that crazy column names are just fine::
 
-            sage: s = server(); C = client(s.port).database.mycol
-            sage: C.insert({"'":393})
-            sage: C.find_one()
+            >>> s = server(); C = client(s.port).database.mycol
+            >>> C.insert({"'":393})
+            >>> C.find_one()
             {"'": 393}
-            sage: C._validate_column_names("'")
-            sage: C._validate_column_names("h5 2")
-            sage: C.insert({"h5 2":3931})
-            sage: list(C.find())
+            >>> C._validate_column_names("'")
+            >>> C._validate_column_names("h5 2")
+            >>> C.insert({"h5 2":3931})
+            >>> list(C.find())
             [{"'": 393}, {'h5 2': 3931}]
 
         But a column name with a double quote is a problem.
-            sage: C._validate_column_names('"')
+            >>> C._validate_column_names('"')
             Traceback (most recent call last):
             ...
             ValueError: column name '"' must not contain a quote
@@ -697,9 +697,9 @@ class Collection(object):
         
         EXAMPLES::
 
-            sage: s = server(); C = client(s.port).database.mycol
-            sage: C._create(['a', 'b', 'c'])
-            sage: C.columns()
+            >>> s = server(); C = client(s.port).database.mycol
+            >>> C._create(['a', 'b', 'c'])
+            >>> C.columns()
             ['a', 'b', 'c']
         """
         self._validate_column_names(columns)
@@ -710,7 +710,7 @@ class Collection(object):
     ###############################################################
     def insert(self, d=None, coerce=True, **kwds):
         """
-        Insert a document or batch of documents into this collection.
+        Insert a document or list of documents into this collection.
         
         INPUT:
         - d -- dict (single document) or list of dict's
@@ -720,16 +720,43 @@ class Collection(object):
 
         EXAMPLES::
 
-            sage: s = server(); C = client(s.port).database.C
-            sage: C.insert({'a':5, 'xyz':10})
-            sage: list(C.find())
+            >>> s = server(); C = client(s.port).database.C
+
+        Insert a document defined by a dictionary::
+        
+            >>> C.insert({'a':5, 'xyz':10})
+            >>> list(C.find())
             [{'a': 5, 'xyz': 10}]
-            sage: C.insert(a=10, xyz='hi', m=[1,2])
-            sage: list(C.find())
+
+        You can also insert a document by using var=value inputs::
+        
+            >>> C.insert(a=10, xyz='hi', m=[1,2])
+            >>> list(C.find())
             [{'a': 5, 'xyz': 10}, {'a': 10, 'xyz': 'hi', 'm': [1, 2]}]
-            sage: C.insert([{'a':2}, {'a':7}, dict(a=5,b=10)])
-            sage: list(C.find())
+
+        By giving a list of dictionaries, you can batch insert
+        serveral documents::
+        
+            >>> C.insert([{'a':2}, {'a':7}, dict(a=5,b=10)])
+            >>> list(C.find())
             [{'a': 5, 'xyz': 10}, {'a': 10, 'xyz': 'hi', 'm': [1, 2]}, {'a': 5, 'b': 10}, {'a': 2}, {'a': 7}]
+
+        Inserting a list of documents is dramatically faster than
+        calling insert repeatedly.  For example, the following insert
+        of 10,000 distinct documents should take less than a second::
+
+            >>> C.insert([{'a':i} for i in range(10000)])
+            >>> len(C)
+            10005
+
+        Inserting a list of documents works even if the documents have
+        different keys::
+
+            >>> C.insert([{'a':5, 'b':10, 'x':15}, {'x':20, 'y':30}])
+            >>> C.find_one(x=15)
+            {'a': 5, 'x': 15, 'b': 10}
+            >>> C.find_one(y=30)
+            {'y': 30, 'x': 20}
         """
         if d is None:
             d = kwds
@@ -784,7 +811,20 @@ class Collection(object):
 
         EXAMPLES::
 
-            >>> 
+            >>> s = server(); db = client(s.port).database; C = db.C
+            >>> C.name
+            'C'
+            >>> C.insert([{'a':5, 'b':10, 'x':15}, {'x':20, 'y':30}])
+            >>> C.rename('collection2')
+            >>> C.name
+            'collection2'
+            >>> C
+            Collection 'database.collection2'
+            >>> C = db.collection2
+            >>> list(C)
+            [{'y': 30, 'x': 20}, {'a': 5, 'x': 15, 'b': 10}]
+            >>> list(db.C)
+            []
         """
         cmd = "ALTER TABLE %s RENAME TO %s"%(self.name, new_name)
         self.database(cmd)
@@ -800,7 +840,11 @@ class Collection(object):
 
         EXAMPLES::
 
-            >>> 
+            >>> s = server(); db = client(s.port).database; C = db.C
+            >>> C.insert([{'a':5, 'b':10, 'x':15}, {'x':20, 'y':30}])
+            >>> C.copy('foo')
+            >>> list(db.foo)
+            [{'y': 30, 'x': 20}, {'a': 5, 'x': 15, 'b': 10}]
         """
         if isinstance(collection, str):
             collection = self.database.__getattr__(collection)
@@ -813,7 +857,7 @@ class Collection(object):
         if len(other) == 0:
             # other collection hasn't been created yet
             collection._create(cols)
-        if cols:
+        elif cols:
             # need to add some columns to other collection
             collection._add_columns(cols)
         # now recipient table has all needed columns, so do the insert in one go.
@@ -827,13 +871,25 @@ class Collection(object):
     ###############################################################
     def update(self, d, query='', **kwds):
         """
+        Set the values specified by the dictionary d for every
+        document that satisfy the given query string (or equality
+        query defined by kwds).
+        
         EXAMPLES::
 
-            >>> 
+            >>> s = server(); db = client(s.port).database; C = db.C
+            >>> C.insert([{'a!b':5, 'b.c':10, 'x':15}, {'x':15, 'y':30}])
+            >>> C.update({'z z':'hello', 'y':20}, x=15)
+            >>> list(C)
+            [{'y': 20, 'x': 15, 'z z': 'hello'}, {'b.c': 10, 'x': 15, 'z z': 'hello', 'y': 20, 'a!b': 5}]
         """
+        new_cols = set(d.keys()).difference(self._columns())
+        if new_cols:
+            self._add_columns(new_cols)
+
         t = tuple([self.database.client._coerce_(x) for x in d.values()])
-        s = ','.join(['%s=? '%x for x in d.keys()])
-        cmd = "UPDATE %s SET %s %s"%(
+        s = ','.join(['"%s"=? '%x for x in d.keys()])
+        cmd = 'UPDATE "%s" SET %s %s'%(
             self.name, s, self._where_clause(query, kwds))
         self.database(cmd, t)
         
