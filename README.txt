@@ -3,11 +3,11 @@ DESCRIPTION:
 NoSQLite is a lightweight zeroconf noSQL document-oriented forking
 Python SQLite networked authenticated XMLRPC database server.
 
+URL:  http://code.google.com/p/nosqlite/
+
 AUTHOR: William Stein
 
-COPYRIGHT:
-
-LICENSE: modified BSD
+COPYRIGHT: new modified BSD 
 
 "Copyright (c) 2011 William Stein, All rights reserved.
 
