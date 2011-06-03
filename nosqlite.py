@@ -3,9 +3,11 @@ NoSQLite is a lightweight zeroconf noSQL document-oriented forking
 Python SQLite networked authenticated XMLRPC database server.
 
 AUTHOR: (c) William Stein, 2011
+
 LICENSE: Modified BSD
 
 TEST SUITE:
+
    To run this module's doctest suite, type::
    
              python nosqlite.py
@@ -93,6 +95,10 @@ class Server(object):
     The noSQLite server object.  Create an instance of this object to
     start a server.
 
+    If s is a server() instance, it is also useful to type s.help() to
+    see directions about how to setup an ssh tunnel in order to
+    securely connect to the server over the network.
+
         >>> s = server(); s
         nosqlite server on port ... serving "..."
         >>> s.quit()
@@ -106,12 +112,13 @@ class Server(object):
                  auto_run = True):
         """
         INPUTS:
-        - username -- 
-        - password -- 
-        - directory -- 
-        - address --
-        - auto_run -- 
-
+        - username -- string (default: 'username')
+        - password -- string (default: 'password'); change this!
+        - directory -- string (default: 'nosqlite_db')
+        - address -- string (default: 'localhost'); the address that
+          the server listens on.
+        - auto_run -- bool (default: True); if True, start the server
+          upon creation of the Server object.
         """
         self.pid = 0
         self.test = _test_mode
@@ -250,8 +257,9 @@ class Server(object):
 
     def help(self):
         """
-        Display a help message about this server, including instructions
-        on how to connect to it.
+        Display a help message about this server, including
+        instructions on how to connect to it.  This also explains how
+        to setup an ssh tunnel in order to securely over a network.
 
         EXAMPLES::
 
@@ -313,11 +321,36 @@ socket.setdefaulttimeout(10)
 
 class Client(object):
     """
-    The noSQLite server object.  Create an instance of this object to
+    The noSQLite client object.  Create an instance of this object to
     connect to a server.
+
+    If C is a client instance, use C.db_name to create the database
+    named db_name.  To create the special in-memory (non-persistent)
+    SQLite database, use C.memory.
+    
+    EXAMPLES::
+    
+        >>> s = server()
+        >>> c = client(s.port)
+        >>> c
+        nosqlite client connected to port 8120
+
+    We illustrate all options::
+
+        >>> c = client(8100, username='foo', password='bar', address='localhost')
+        >>> c = client(8100, 'foo', 'bar', 'localhost')
     """
     def __init__(self, port=8100, username='username', password='password',
                  address="localhost"):
+        """
+        INPUTS:
+        - port -- int (default: 8100); port to connect to
+        - username -- string (default: 'username')
+        - password -- string (default: 'password'); you likely have to
+          change this
+        - address -- string (default: 'localhost'); name of computer
+          to connect to
+        """
         self.address = str(address)
         self.port = port
         self.server = xmlrpclib.Server('http://%s:%s@%s:%s'%
@@ -325,9 +358,62 @@ class Client(object):
                                        allow_none=True)
 
     def __repr__(self):
-        return "noSQLite client http://%s:%s"%(self.address, self.port)
+        """
+        EXAMPLES::
+
+            >>> client(8110, 'mod.math.washington.edu').__repr__()
+            'nosqlite client connected to port 8110'
+        """
+        s = "nosqlite client connected to port %s"%self.port
+        if self.address != 'localhost':
+            s += ' of %s'%self.address
+        return s
         
     def __call__(self, cmd, t=None, file='default', many=False, coerce=True):
+        """
+        Send a SQL query to the server.
+
+        INPUT:
+        - cmd -- string; a single SQL command
+        - t -- tuple (default: None) optional arguments that replace
+          the ?'s in the cmd (but see 'many' option below).
+        - file -- string (default: 'default') the database file on
+          which to execute the query
+        - many -- bool (default: False); if True, then execute cmd
+          with each tuple in t replacing ?.  This is used, e.g., for
+          very fast batch inserts.
+        - coerce -- bool (default: True); if True, then entries in t
+          are coerced to int, bool, float, str, or pickles.
+
+        OUTPUT:
+        - list of results of the query
+
+        EXAMPLES::
+
+            >>> s = server(); c = client(s.port)
+            >>> c.db.data.insert([{'a':5, 'bc':10}, {'a':3}, {'a':4, 'bc':15}])
+            >>> c('SELECT * FROM data WHERE a<?', t=(5,), file='db')
+            [[3, None], [4, 15]]
+            >>> c('INSERT INTO data VALUES(?,?)', t=[(1,2),(3,8)], file='db', many=True)
+            []
+            >>> c('SELECT * FROM data', file='db')
+            [[3, None], [5, 10], [4, 15], [1, 2], [3, 8]]
+
+        Coercion automatically pickles when the datatype is not int,
+        bool, float, or str::
+
+            >>> c('INSERT INTO data VALUES(?,?)', t=[[1,2],[3,4]], file='db', coerce=True)
+            []
+            >>> c('SELECT * FROM data WHERE a>="__pickle"', file='db')
+            [['__pickleeJxr...', '__pickleeJxrY...']]
+
+        If we do not coerce, we just get an error::
+
+            >>> c('INSERT INTO data VALUES(?,?)', t=[[1,2],[3,4]], file='db', coerce=False)
+            Traceback (most recent call last):
+            ...
+            RuntimeError: ...
+        """
         if not isinstance(cmd, str):
             raise TypeError, "cmd (=%s) must be a string"%cmd
         if coerce:
@@ -341,13 +427,52 @@ class Client(object):
         except xmlrpclib.Fault, e:
             raise RuntimeError, str(e) + ', cmd="%s"'%cmd
             
-    
     def __getattr__(self, name):
+        """
+        Return the database with given name.  If name is 'memory',
+        returns the in-memory database.
+
+        INPUT:
+        - name -- string
+
+        OUTPUT:
+        - Database object
+
+        EXAMPLES::
+
+            >>> s = server(); c = client(s.port)
+            >>> c.mydb
+            Database 'mydb'
+
+        WARNING: there is a special in-memory only database that you get
+        by accessing "memory".    This does not get saved to disk::
+
+            >>> db = c.memory
+            >>> db.name
+            ':memory:'
+            >>> db
+            Database ':memory:'
+        """
         if name == 'memory':
             name = ':memory:'
         return Database(self, name)
 
     def _coerce_(self, x):
+        """
+        EXAMPLES::
+
+            >>> s = server(); c = client(s.port)
+            >>> c._coerce_(False)
+            0
+            >>> c._coerce_(True)
+            1
+            >>> c._coerce_('lkjdf')
+            'lkjdf'
+            >>> c._coerce_(2.5)
+            2.5
+            >>> c._coerce_([1,2])
+            '__pickleeJxrYIot...'
+        """
         if isinstance(x, bool):
             x = int(x)
         elif isinstance(x, (str, int, long, float)):
@@ -361,59 +486,222 @@ class Client(object):
         return x
 
     def _coerce_back_(self, x):
+        """
+        EXAMPLES::
+
+            sage: s = server(); c = client(s.port)
+            sage: z = c._coerce_([1,2])
+            sage: c._coerce_back_(z)
+            [1, 2]
+        """
         if isinstance(x, str) and x.startswith('__pickle'):
             return cPickle.loads(zlib.decompress(base64.b64decode(x[8:])))
         return x
 
 class Database(object):
+    """
+    A nosqlite Database object.  This represents a group of
+    collections.
+    """
     def __init__(self, client, name):
+        """
+        EXAMPLES::
+
+            sage: s = server(); c = client(s.port)
+            sage: db = c.database; db
+            Database 'database'
+            sage: type(db)
+            <class '__main__.Database'>
+            sage: db.client
+            nosqlite client connected to port ...
+            sage: db.name
+            'database'
+        """
         self.client = client
         self.name = str(name)
 
     def vacuum(self):
+        """
+        Free unused disk space used by this database.  If you delete
+        collections and want the corresponding disk spaces to be
+        freed, call this function.
+        
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: db.vacuum()
+        """
         self('vacuum')
 
     def __call__(self, cmds, t=None, many=False, coerce=True):
+        """
+        Send an SQL query to the database server.  The input
+        parameters are exactly the same as for the Client object's
+        __call__ method, except that the file defaults to self.name.
+        
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: db.coll.insert([{'a':i} for i in range(6)])
+            sage: db('select count(*) from coll')
+            [[6]]
+        """
         return self.client(cmds, t, file=self.name, many=many, coerce=coerce)
 
     def __getattr__(self, name):
+        """
+        Returns the collection in this database with the given name.
+        
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: c = db.coll; c
+            Collection 'database.coll'
+            sage: type(c)
+            <class '__main__.Collection'>
+            sage: db.__getattr__('coll')
+            Collection 'database.coll'
+        """
         return Collection(self, name)
 
     def trait_names(self):
+        """
+        Used so that we can tab complete in IPython/Sage when
+        selecting a collection in this database as an attribute.
+        
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: db.col1.insert({'a':0}); db.my_col2.insert({'a':10})
+            sage: db.trait_names()
+            ['col1', 'my_col2']
+        """
         return [C.name for C in self.collections()]
 
     def __repr__(self):
+        """
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database; db.__repr__()
+            "Database 'database'"
+        """
         return "Database '%s'"%self.name
 
     def collections(self):
+        """
+        A list of all of the collections in this database.
+
+        NOTE: This is not a list of the names of collections but of
+        the actual collections themselves.
+        
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: db.col1.insert({'a':0}); db.my_col2.insert({'a':10})
+            sage: v = db.collections(); v
+            [Collection 'database.col1', Collection 'database.my_col2']
+            sage: v[0].find_one()
+            {'a': 0}
+        """
         cmd = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         return [Collection(self, x[0]) for x in self(cmd)]
 
-re_identifier = re.compile('[_a-zA-Z]\w*')
-
 class Collection(object):
     def __init__(self, database, name):
+        """
+        INPUTS:
+        - database -- a Database object
+        - name -- string, name of this collection
+        
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: C = db.mycoll; C
+            Collection 'database.mycoll'
+            sage: type(C)
+            <class '__main__.Collection'>
+            sage: C.database
+            Database 'database'
+            sage: C.name
+            'mycoll'
+        """
         self.database = database
         self.name = str(name)
 
     def __repr__(self):
+        """
+        EXAMPLES::
+
+            sage: s = server(); db = client(s.port).database
+            sage: C = db.mycoll; C.__repr__()
+            "Collection 'database.mycoll'"
+        """
         return "Collection '%s.%s'"%(self.database.name, self.name)
 
     def __len__(self):
+        """
+        Return the number of documents in this collection.
+        
+        EXAMPLES::
+
+            sage: s = server(); C = client(s.port).database.mycol
+            sage: len(C)
+            0
+            sage: C.insert([{'a':i} for i in range(100)])
+            sage: len(C)
+            100
+        """
         try:
             cmd = 'SELECT COUNT(*) FROM "%s"'%self.name
             return int(self.database(cmd)[0][0])
-        except xmlrpclib.Fault:
+        except RuntimeError:
             if len(self._columns()) == 0:
                 return 0
             raise
 
     def _validate_column_names(self, columns):
+        """
+        Raise a ValueError exception if a given column name is invalid.  A column
+        name is invalid only if it contains a double quote.
+        
+        EXAMPLES::
+
+        We illustrate that crazy column names are just fine::
+
+            sage: s = server(); C = client(s.port).database.mycol
+            sage: C.insert({"'":393})
+            sage: C.find_one()
+            {"'": 393}
+            sage: C._validate_column_names("'")
+            sage: C._validate_column_names("h5 2")
+            sage: C.insert({"h5 2":3931})
+            sage: list(C.find())
+            [{"'": 393}, {'h5 2': 3931}]
+
+        But a column name with a double quote is a problem.
+            sage: C._validate_column_names('"')
+            Traceback (most recent call last):
+            ...
+            ValueError: column name '"' must not contain a quote
+        """
         for c in columns:
-            if re_identifier.match(c) is None:
-                raise ValueError, "column name '%s' is not a valid identifier"%c
+            if '"' in c:
+                raise ValueError, "column name '%s' must not contain a quote"%c
 
     def _create(self, columns):
+        """
+        Create this table for the first time with the given columns.
+
+        INPUT:
+        - columns -- a nonempty list of strings
+        
+        EXAMPLES::
+
+            sage: s = server(); C = client(s.port).database.mycol
+            sage: C._create(['a', 'b', 'c'])
+            sage: C.columns()
+            ['a', 'b', 'c']
+        """
         self._validate_column_names(columns)
         self.database('CREATE TABLE "%s" (%s)'%(self.name, ', '.join('"%s"'%s for s in columns)))
         
@@ -422,18 +710,34 @@ class Collection(object):
     ###############################################################
     def insert(self, d=None, coerce=True, **kwds):
         """
+        Insert a document or batch of documents into this collection.
+        
         INPUT:
         - d -- dict (single document) or list of dict's
-        - coerce -- whether to coerce values
+        - coerce -- bool (default: True); if True, coerce values
         - kwds -- gets merged into d, providing a convenient shorthand
           for inserting a document.
+
+        EXAMPLES::
+
+            sage: s = server(); C = client(s.port).database.C
+            sage: C.insert({'a':5, 'xyz':10})
+            sage: list(C.find())
+            [{'a': 5, 'xyz': 10}]
+            sage: C.insert(a=10, xyz='hi', m=[1,2])
+            sage: list(C.find())
+            [{'a': 5, 'xyz': 10}, {'a': 10, 'xyz': 'hi', 'm': [1, 2]}]
+            sage: C.insert([{'a':2}, {'a':7}, dict(a=5,b=10)])
+            sage: list(C.find())
+            [{'a': 5, 'xyz': 10}, {'a': 10, 'xyz': 'hi', 'm': [1, 2]}, {'a': 5, 'b': 10}, {'a': 2}, {'a': 7}]
         """
         if d is None:
             d = kwds
         elif isinstance(d, dict):
             d.update(kwds)
         else:
-            raise ValueError, "if kwds given, then d must be None or a dict"
+            if len(kwds) > 0:
+                raise ValueError, "if kwds given, then d must be None or a dict"
 
         # Determine the keys of all documents we will be inserting.
         if isinstance(d, list):
@@ -477,6 +781,10 @@ class Collection(object):
         
         INPUT:
         - new_name -- string
+
+        EXAMPLES::
+
+            >>> 
         """
         cmd = "ALTER TABLE %s RENAME TO %s"%(self.name, new_name)
         self.database(cmd)
@@ -489,6 +797,10 @@ class Collection(object):
 
         INPUT:
         - collection -- a Collection or string (that names a collection).
+
+        EXAMPLES::
+
+            >>> 
         """
         if isinstance(collection, str):
             collection = self.database.__getattr__(collection)
@@ -514,6 +826,11 @@ class Collection(object):
     # Updating documents
     ###############################################################
     def update(self, d, query='', **kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         t = tuple([self.database.client._coerce_(x) for x in d.values()])
         s = ','.join(['%s=? '%x for x in d.keys()])
         cmd = "UPDATE %s SET %s %s"%(
@@ -533,6 +850,10 @@ class Collection(object):
         - delimiter -- string (default: ' ')
         - quotechar -- string (default: '|')
         - order_by -- string (default: None)
+
+        EXAMPLES::
+
+            >>> 
         """
         if isinstance(csvfile, str):
             csvfile = open(csvfile, 'wb')
@@ -558,6 +879,10 @@ class Collection(object):
         - delimiter -- string (default: ' ')
         - quotechar -- string (default: '|')
         - columns -- None or list of strings (column headings)
+
+        EXAMPLES::
+
+            >>>         
         """
         if isinstance(csvfile, str):
             csvfile = open(csvfile, 'rb')
@@ -585,6 +910,11 @@ class Collection(object):
     # Deleting documents
     ###############################################################
     def delete(self, query='', **kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         if not query and len(kwds) == 0:
             # just drop the table
             cmd = 'DROP TABLE "%s"'%self.name
@@ -597,12 +927,22 @@ class Collection(object):
     ###############################################################
     
     def _index_pattern(self, kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         cols = ','.join(['%s %s'%(column, 'DESC' if direction < 0 else 'ASC') for
                          column, direction in sorted(kwds.iteritems())])
         index_name = 'idx___%s___%s'%(self.name, cols.replace(',','___').replace(' ',''))
         return cols, index_name
 
     def ensure_index(self, unique=None, **kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         if len(kwds) == 0:
             raise ValueError, "must specify some keys"
         cols, index_name = self._index_pattern(kwds)
@@ -611,17 +951,32 @@ class Collection(object):
         self.database(cmd)
 
     def drop_index(self, **kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         cols, index_name = self._index_pattern(kwds)
         cmd = 'DROP INDEX IF EXISTS "%s"'%index_name
         self.database(cmd)
 
     def drop_indexes(self):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         cmd = "SELECT * FROM sqlite_master WHERE type='index' and tbl_name='%s'"%self.name
         for x in self.database(cmd):
             if x[1].startswith('idx___'):
                 self.database('DROP INDEX IF EXISTS "%s"'%x[1])
 
     def indexes(self):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         cmd = "SELECT * FROM sqlite_master WHERE type='index' and tbl_name='%s' ORDER BY name"%self.name
         v = []
         for x in self.database(cmd):
@@ -640,15 +995,30 @@ class Collection(object):
     ###############################################################
 
     def _columns(self):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         a = self.database('PRAGMA table_info("%s")'%self.name)
         if a is None:
             return []
         return [x[1] for x in a]
 
     def columns(self):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         return [x for x in self._columns() if x != 'rowid']
 
     def _add_columns(self, new_columns):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         self._validate_column_names(new_columns)        
         for col in new_columns:
             try:
@@ -663,6 +1033,10 @@ class Collection(object):
     def find_one(self, *args, **kwds):
         """
         Return first document that match the given query.
+
+        EXAMPLES::
+
+            >>> 
         """
         v = list(self.find(*args, limit=1, **kwds))
         if len(v) == 0:
@@ -670,6 +1044,11 @@ class Collection(object):
         return v[0]
         
     def _where_clause(self, query, kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """
         if len(kwds) > 0:
             for key, val in kwds.iteritems():
                 val = self.database.client._coerce_(val)
@@ -682,6 +1061,11 @@ class Collection(object):
 
     def _find_cmd(self, query='', fields=None, limit=None, offset=0,
                   order_by=None, batch_size=50, _rowid=False, _count=False, **kwds):
+        """
+        EXAMPLES::
+
+            >>> 
+        """        
         cmd = 'SELECT rowid,' if _rowid else 'SELECT '
         cmd += 'COUNT(*) ' if _count else ' * '
         if fields is None:
@@ -710,18 +1094,32 @@ class Collection(object):
     def count(self, *args, **kwds):
         """
         Return the number of documents that match a given find query.
+
+        EXAMPLES::
+
+            >>>                 
         """
         kwds['_count'] = True
         cmd = self._find_cmd(*args, **kwds)
         return self.database(cmd)[0]
 
     def __iter__(self):
+        """
+        EXAMPLES::
+
+            >>> 
+        """        
         return self.find()
 
     def find(self, query='', fields=None, batch_size=50,
              _rowid=False, limit=None, offset=0, **kwds):
         """
         Return iteratoe over all documents that match the given query.
+
+
+        EXAMPLES::
+
+            >>>         
         """
         cmd = self._find_cmd(query=query, fields=fields, batch_size=batch_size,
                              _rowid=_rowid,
@@ -789,12 +1187,13 @@ def _constant_key_grouping(d):
             x[k] = [a]
     return x.values()
 
-# convenience for lower-case people    
+# Easier usage
 server = Server
 client = Client
 
-_test_mode = False
 
+# Doctesting
+_test_mode = True
 if __name__ == "__main__":
     _test_mode = True
     import doctest
