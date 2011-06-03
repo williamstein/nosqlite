@@ -1,0 +1,3 @@
+[ ] finish writing doctests and docstrings
+[ ] tutorial at the top
+[ ] make also work with python3

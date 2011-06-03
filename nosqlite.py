@@ -220,11 +220,11 @@ class Server(object):
                     (self.address, port), allow_none=True)
                 success = True
                 break
-            except socket.error, e:
+            except socket.error:
                 port += 1
                 
         if not success:
-            raise RuntimeError, "Unable to find an open port."
+            raise RuntimeError("Unable to find an open port.")
 
         self.port = port
 
@@ -272,23 +272,24 @@ class Server(object):
             ----------------------------------------------------------------------
         """
         fqdn = socket.getfqdn()
-        print "-"*70
-        print self
-        print "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(self.port, self.username),
+        print("-"*70)
+        print(self)
+        s = "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(self.port, self.username)
         if self.address != 'localhost':
-            print ", '%s')"%self.address
+            s += ", '%s')"%self.address
         else:
-            print ")"
-        print ""
+            s += ")"
+        print s
+        print("")
         if self.address == 'localhost':
-            print "To securely connect from a remote client, setup an ssh tunnel by"
-            print "typing on the client:\n"
-            print "\tssh -L %s:localhost:%s %s"%(self.port, self.port, fqdn)
-            print "\nthen\n"
-            print "\tclient(%s, '%s', 'xxx')"%(self.port, self.username)
-        print "\nTo stop server, delete the server object, call the quit()"
-        print "method, or kill pid %s."%os.getpid()
-        print "-"*70
+            print("To securely connect from a remote client, setup an ssh tunnel by")
+            print("typing on the client:\n")
+            print("\tssh -L %s:localhost:%s %s"%(self.port, self.port, fqdn))
+            print("\nthen\n")
+            print("\tclient(%s, '%s', 'xxx')"%(self.port, self.username))
+        print("\nTo stop server, delete the server object, call the quit()")
+        print("method, or kill pid %s."%os.getpid())
+        print("-"*70)
         
 
     def __repr__(self):
@@ -415,7 +416,7 @@ class Client(object):
             RuntimeError: ...
         """
         if not isinstance(cmd, str):
-            raise TypeError, "cmd (=%s) must be a string"%cmd
+            raise TypeError("cmd (=%s) must be a string"%cmd)
         if coerce:
             if many:
                 t = [tuple([self._coerce_(x) for x in y]) for y in t]
