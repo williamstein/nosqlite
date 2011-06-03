@@ -4,9 +4,19 @@ Python SQLite networked authenticated XMLRPC database server.
 
 AUTHOR: (c) William Stein, 2011
 LICENSE: Modified BSD
+
+TEST SUITE:
+   To run this module's doctest suite, type::
+   
+             python nosqlite.py
+             
+   All doctest examples assume that the following line was executed::
+   
+          >>> from nosqlite import client, server
 """
 
 import os
+import re
 import shutil
 import tempfile
 
@@ -30,7 +40,7 @@ from SimpleXMLRPCServer import (SimpleXMLRPCServer, SimpleXMLRPCRequestHandler)
 # installed.
 try:
     from sage.rings.all import is_Integer, is_RealNumber
-except ImportError:
+except:
     is_Integer = lambda x: False
     is_RealNumber = lambda x: False
 
@@ -81,22 +91,32 @@ class VerifyingServer(SocketServer.ForkingMixIn,
 class Server(object):
     """
     The noSQLite server object.  Create an instance of this object to
-    start a server. 
+    start a server.
 
-        sage: s = Server(test=True)
+        >>> s = server(); s
+        nosqlite server on port ... serving "..."
+        >>> s.quit()
+        >>> s
+        nosqlite server object (not running)
     """
     def __init__(self,
                  username='username', password='password',
-                 directory='nosqlite.db',
+                 directory='nosqlite_db',
                  address="localhost", port=8100,
-                 auto_run = True,
-                 test = False,
-                 verbose = True):
-        self.test = test
-        if test:
-            verbose = False
+                 auto_run = True):
+        """
+        INPUTS:
+        - username -- 
+        - password -- 
+        - directory -- 
+        - address --
+        - auto_run -- 
+
+        """
+        self.pid = 0
+        self.test = _test_mode
+        if self.test:
             directory = tempfile.mkdtemp()
-        self.verbose = verbose
         self.directory = str(directory)
         self.username = username
         self.password = password
@@ -105,17 +125,29 @@ class Server(object):
         self.address = str(address)
         self.port = int(port)
         self._dbs = {}
-        if not self.test and auto_run:
-            self.run()
+        if auto_run:
+            self._run()
 
     def __del__(self):
         try:
-            self.stop()
+            self.quit()
         finally:
             if hasattr(self, 'test') and self.test:
                 shutil.rmtree(self.directory, ignore_errors=True)
 
     def db(self, file):
+        """
+        Return sqlite connection to database with given filename in self.directory.
+        
+        EXAMPLES::
+
+            >>> s = server()
+            >>> import os
+            >>> con = s.db(os.path.join(s.directory, 'bar')); con
+            <sqlite3.Connection object at 0x...>
+            >>> list(con.cursor().execute('PRAGMA database_list'))
+            [(0, u'main', u'/.../bar')]
+        """
         try:
             return self._dbs[file]
         except KeyError:
@@ -123,10 +155,55 @@ class Server(object):
             self._dbs[file] = db
             return db
 
-    def stop(self):
-        os.kill(self.pid, 9)
+    def quit(self):
+        """
+        Terminate the server, which is by default running in the background.
 
-    def run(self, max_tries=100):
+        EXAMPLES::
+        
+            >>> s = server(); s
+            nosqlite server on port ... serving "..."
+            >>> s.pid != 0
+            True
+            >>> s.quit()
+            >>> s.pid
+            0
+            >>> s
+            nosqlite server object (not running)
+            >>> port = s._run(); port != 0
+            True
+            >>> s
+            nosqlite server on port ... serving "..."
+        """
+        if hasattr(self, 'pid') and self.pid:
+            os.kill(self.pid, 9)
+            self.pid = 0
+
+    def _run(self, max_tries=1000):
+        """
+        Run the server.
+
+        By default, this function gets called when you first create
+        the server object (use auto_run=False to stop that).  It
+        attempts to run the server listening at self.port, and if that
+        fails tries the next port, etc. up to max_tries times.  The
+        server itself is run in a separate background process.  To
+        kill the server, use self.quit().
+
+        INPUT:
+        - max_tries -- int (default: 1000); maximum number of ports to try
+        
+        OUTPUT:
+        - the port on which the server is running; also self.port is set
+
+        EXAMPLES::
+
+            >>> s = server(auto_run=False); s
+            nosqlite server object (not running)
+            >>> port = s._run()
+            >>> port != 0
+            True
+        """
         port = self.port
         success = False
         for i in range(max_tries):
@@ -137,12 +214,12 @@ class Server(object):
                 success = True
                 break
             except socket.error, e:
-                if self.verbose:
-                    print "Port %s is unavailable."%port
                 port += 1
-
+                
         if not success:
             raise RuntimeError, "Unable to find an open port."
+
+        self.port = port
 
         pid = os.fork()
         if pid != 0:
@@ -168,32 +245,60 @@ class Server(object):
             db.commit()
             return v
 
-        if self.verbose:
-            fqdn = socket.getfqdn()
-            print "\n"
-            print "-"*70
-            print "noSQLite serving '%s/'."%os.path.abspath(self.directory),
-            print "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(port, self.username),
-            if self.address != 'localhost':
-                print ", '%s')"%self.address
-            else:
-                print ")"
-            print ""
-            if self.address == 'localhost':
-                print "To securely connect from a remote client, setup an ssh tunnel by"
-                print "typing on the client:\n"
-                print "\tssh -L %s:localhost:%s %s"%(port, port, fqdn)
-                print "\nthen\n"
-                print "\tclient(%s, '%s', 'xxx')"%(port, self.username)
-            print "\nDelete server object to terminate server or kill pid %s."%os.getpid()
-            print "-"*70
-            
         server.register_function(execute, 'execute')
         server.serve_forever()
+
+    def help(self):
+        """
+        Display a help message about this server, including instructions
+        on how to connect to it.
+
+        EXAMPLES::
+
+            >>> s = server()
+            >>> s.help()
+            ----------------------------------------------------------------------
+            nosqlite server on port ... serving "..."
+            Connect with
+            ...
+            ----------------------------------------------------------------------
+        """
+        fqdn = socket.getfqdn()
+        print "-"*70
+        print self
+        print "Connect with\n\n\tclient(%s, '%s', 'xxx'"%(self.port, self.username),
+        if self.address != 'localhost':
+            print ", '%s')"%self.address
+        else:
+            print ")"
+        print ""
+        if self.address == 'localhost':
+            print "To securely connect from a remote client, setup an ssh tunnel by"
+            print "typing on the client:\n"
+            print "\tssh -L %s:localhost:%s %s"%(self.port, self.port, fqdn)
+            print "\nthen\n"
+            print "\tclient(%s, '%s', 'xxx')"%(self.port, self.username)
+        print "\nTo stop server, delete the server object, call the quit()"
+        print "method, or kill pid %s."%os.getpid()
+        print "-"*70
         
 
     def __repr__(self):
-        return "noSQLite server http://%s:%s"%(self.address, self.port)
+        """
+        Return string representation of the server.
+
+        EXAMPLES::
+        
+            >>> server().__repr__()
+            'nosqlite server on port ... serving "..."'
+        """
+        if self.pid == 0:
+            return "nosqlite server object (not running)"
+        s = "nosqlite server on port %s"%self.port
+        if self.address != 'localhost':
+            s += ' of %s'%self.address
+        s += ' serving "%s/"'%self.directory
+        return s
 
 
 ###########################################################################
@@ -207,6 +312,10 @@ class Server(object):
 socket.setdefaulttimeout(10)  
 
 class Client(object):
+    """
+    The noSQLite server object.  Create an instance of this object to
+    connect to a server.
+    """
     def __init__(self, port=8100, username='username', password='password',
                  address="localhost"):
         self.address = str(address)
@@ -227,7 +336,11 @@ class Client(object):
             else:
                 if t is not None:
                     t = tuple([self._coerce_(x) for x in t])
-        return self.server.execute(cmd, t, file, many)
+        try:
+            return self.server.execute(cmd, t, file, many)
+        except xmlrpclib.Fault, e:
+            raise RuntimeError, str(e) + ', cmd="%s"'%cmd
+            
     
     def __getattr__(self, name):
         if name == 'memory':
@@ -276,6 +389,8 @@ class Database(object):
         cmd = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         return [Collection(self, x[0]) for x in self(cmd)]
 
+re_identifier = re.compile('[_a-zA-Z]\w*')
+
 class Collection(object):
     def __init__(self, database, name):
         self.database = database
@@ -286,15 +401,21 @@ class Collection(object):
 
     def __len__(self):
         try:
-            cmd = "SELECT COUNT(*) FROM %s"%self.name
+            cmd = 'SELECT COUNT(*) FROM "%s"'%self.name
             return int(self.database(cmd)[0][0])
         except xmlrpclib.Fault:
             if len(self._columns()) == 0:
                 return 0
             raise
 
+    def _validate_column_names(self, columns):
+        for c in columns:
+            if re_identifier.match(c) is None:
+                raise ValueError, "column name '%s' is not a valid identifier"%c
+
     def _create(self, columns):
-        self.database("CREATE TABLE %s (%s)"%(self.name, ', '.join(columns)))
+        self._validate_column_names(columns)
+        self.database('CREATE TABLE "%s" (%s)'%(self.name, ', '.join('"%s"'%s for s in columns)))
         
     ###############################################################
     # Inserting documents: one at a time or in a batch
@@ -314,16 +435,16 @@ class Collection(object):
         else:
             raise ValueError, "if kwds given, then d must be None or a dict"
 
-        # Make sure that the keys of d are a subset of the columns of
-        # the corresponding table.  If not, expand that table by
-        # adding a new column, which is one thing we can easily do
-        # to change a table in sqlite.
-
+        # Determine the keys of all documents we will be inserting.
         if isinstance(d, list):
             keys = set().union(*d)
         else:
             keys = set(d.keys())
-
+            
+        # Make sure that the keys of d are a subset of the columns of
+        # the corresponding table.  If not, expand that table by
+        # adding a new column, which is one thing we can easily do
+        # to change a table in sqlite.
         current_cols = self._columns()
         new_columns = keys.difference(current_cols)
         if len(current_cols) == 0:
@@ -384,8 +505,8 @@ class Collection(object):
             # need to add some columns to other collection
             collection._add_columns(cols)
         # now recipient table has all needed columns, so do the insert in one go.
-        c = ','.join(fields)
-        cmd = "INSERT INTO %s (%s) SELECT %s FROM %s %s"%(
+        c = ','.join(['"%s"'%x for x in fields])
+        cmd = 'INSERT INTO "%s" (%s) SELECT %s FROM "%s" %s'%(
             collection.name, c, c, self.name, self._where_clause(query, kwds))
         self.database(cmd)
 
@@ -417,7 +538,7 @@ class Collection(object):
             csvfile = open(csvfile, 'wb')
         import csv
         W = csv.writer(csvfile, delimiter=delimiter, quotechar=quotechar, quoting=csv.QUOTE_MINIMAL)
-        cmd = 'SELECT * FROM %s '%self.name
+        cmd = 'SELECT * FROM "%s" '%self.name
         if order_by is not None:
             cmd += ' ORDER BY %s'%order_by
         if write_columns:
@@ -466,9 +587,9 @@ class Collection(object):
     def delete(self, query='', **kwds):
         if not query and len(kwds) == 0:
             # just drop the table
-            cmd = "DROP TABLE %s"%self.name
+            cmd = 'DROP TABLE "%s"'%self.name
         else:
-            cmd = "DELETE FROM %s %s"%(self.name, self._where_clause(query, kwds))
+            cmd = 'DELETE FROM "%s" %s'%(self.name, self._where_clause(query, kwds))
         self.database(cmd)
 
     ###############################################################
@@ -491,14 +612,14 @@ class Collection(object):
 
     def drop_index(self, **kwds):
         cols, index_name = self._index_pattern(kwds)
-        cmd = "DROP INDEX IF EXISTS %s"%index_name
+        cmd = 'DROP INDEX IF EXISTS "%s"'%index_name
         self.database(cmd)
 
     def drop_indexes(self):
         cmd = "SELECT * FROM sqlite_master WHERE type='index' and tbl_name='%s'"%self.name
         for x in self.database(cmd):
             if x[1].startswith('idx___'):
-                self.database("DROP INDEX IF EXISTS %s"%x[1])
+                self.database('DROP INDEX IF EXISTS "%s"'%x[1])
 
     def indexes(self):
         cmd = "SELECT * FROM sqlite_master WHERE type='index' and tbl_name='%s' ORDER BY name"%self.name
@@ -519,7 +640,7 @@ class Collection(object):
     ###############################################################
 
     def _columns(self):
-        a = self.database("PRAGMA table_info(%s)"%self.name)
+        a = self.database('PRAGMA table_info("%s")'%self.name)
         if a is None:
             return []
         return [x[1] for x in a]
@@ -528,9 +649,10 @@ class Collection(object):
         return [x for x in self._columns() if x != 'rowid']
 
     def _add_columns(self, new_columns):
+        self._validate_column_names(new_columns)        
         for col in new_columns:
             try:
-                self.database("ALTER TABLE %s ADD COLUMN %s"%(self.name, col))
+                self.database('ALTER TABLE "%s" ADD COLUMN "%s"'%(self.name, col))
             except xmlrpclib.Fault:
                 # TODO: make it into a single transaction...
                 # The above could safely fail if another client tried
@@ -563,11 +685,11 @@ class Collection(object):
         cmd = 'SELECT rowid,' if _rowid else 'SELECT '
         cmd += 'COUNT(*) ' if _count else ' * '
         if fields is None:
-            cmd += ' FROM %s'%self.name
+            cmd += ' FROM "%s"'%self.name
         else:
             if isinstance(fields, str):
                 fields = [fields]
-            cmd += '%s FROM %s'%(','.join(fields), self.name)
+            cmd += '%s FROM "%s"'%(','.join(fields), self.name)
 
         cmd += self._where_clause(query, kwds)
 
@@ -592,6 +714,9 @@ class Collection(object):
         kwds['_count'] = True
         cmd = self._find_cmd(*args, **kwds)
         return self.database(cmd)[0]
+
+    def __iter__(self):
+        return self.find()
 
     def find(self, query='', fields=None, batch_size=50,
              _rowid=False, limit=None, offset=0, **kwds):
@@ -633,11 +758,12 @@ def _insert_statement(table, cols):
 
     EXAMPLES::
 
-        sage: from nosqlite import _insert_statement
-        sage: _insert_statement('table_name', ['col1', 'col2', 'col3'])
-        'INSERT INTO table_name (col1,col2,col3) VALUES(?,?,?)'
+        >>> from nosqlite import _insert_statement
+        >>> _insert_statement('table_name', ['col1', 'col2', 'col3'])
+        'INSERT INTO "table_name" ("col1","col2","col3") VALUES(?,?,?)'
     """
-    return 'INSERT INTO %s (%s) VALUES(%s)'%(table, ','.join(cols), ','.join(['?']*len(cols)))
+    cols = ['"%s"'%c for c in cols]
+    return 'INSERT INTO "%s" (%s) VALUES(%s)'%(table, ','.join(cols), ','.join(['?']*len(cols)))
 
 def _constant_key_grouping(d):
     """
@@ -650,8 +776,8 @@ def _constant_key_grouping(d):
 
     EXAMPLES::
 
-        sage: from nosqlite import _constant_key_grouping
-        sage: _constant_key_grouping([{'a':5,'b':7}, {'a':10,'c':4}, {'a':5, 'b':8}])
+        >>> from nosqlite import _constant_key_grouping
+        >>> _constant_key_grouping([{'a':5,'b':7}, {'a':10,'c':4}, {'a':5, 'b':8}])
         [[{'a': 5, 'b': 7}, {'a': 5, 'b': 8}], [{'a': 10, 'c': 4}]]
     """
     x = {}
@@ -667,3 +793,9 @@ def _constant_key_grouping(d):
 server = Server
 client = Client
 
+_test_mode = False
+
+if __name__ == "__main__":
+    _test_mode = True
+    import doctest
+    doctest.testmod(optionflags=doctest.ELLIPSIS)
