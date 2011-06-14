@@ -100,7 +100,7 @@ class Server(object):
     securely connect to the server over the network.
 
         >>> s = server(); s
-        nosqlite server on port ... serving "..."
+        nosqlite server on port ...
         >>> s.quit()
         >>> s
         nosqlite server object (not running)
@@ -170,7 +170,7 @@ class Server(object):
         EXAMPLES::
         
             >>> s = server(); s
-            nosqlite server on port ... serving "..."
+            nosqlite server on port ...
             >>> s.pid != 0
             True
             >>> s.quit()
@@ -181,7 +181,7 @@ class Server(object):
             >>> port = s._run(); port != 0
             True
             >>> s
-            nosqlite server on port ... serving "..."
+            nosqlite server on port ...
         """
         if hasattr(self, 'pid') and self.pid:
             os.kill(self.pid, 9)
@@ -267,7 +267,7 @@ class Server(object):
             >>> s = server()
             >>> s.help()
             ----------------------------------------------------------------------
-            nosqlite server on port ... serving "..."
+            nosqlite server on port ...
             Connect with
             ...
             ----------------------------------------------------------------------
@@ -300,14 +300,14 @@ class Server(object):
         EXAMPLES::
         
             >>> server().__repr__()
-            'nosqlite server on port ... serving "..."'
+            'nosqlite server on port ...'
         """
         if self.pid == 0:
             return "nosqlite server object (not running)"
         s = "nosqlite server on port %s"%self.port
         if self.address != 'localhost':
             s += ' of %s'%self.address
-        s += ' serving "%s/"'%self.directory
+
         return s
 
 
@@ -317,6 +317,40 @@ class Server(object):
 #  This is where all of the complicated logic is.
 #
 ###########################################################################
+
+class LocalServer(object):
+    def __init__(self, directory):
+        self.directory = directory
+        self._dbs = {}
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+    
+    # TODO: These two functions are in the Server above too -- *refactor* somehow...
+    def db(self, file):
+        try:
+            return self._dbs[file]
+        except KeyError:
+            db = sqlite3.connect(file)
+            self._dbs[file] = db
+            return db
+
+    def execute(self, cmds, t, file='default', many=False):
+        db = self.db(os.path.join(self.directory, file) if file != ':memory:' else file)
+        cursor = db.cursor()
+        if isinstance(cmds, str):
+            if t is not None:
+                cmds = [(cmds, t)]
+            else:
+                cmds = [cmds]
+        v = []
+        for c in cmds:
+            if isinstance(c, tuple):
+                o = cursor.executemany(*c) if many else cursor.execute(*c)
+            else:
+                o = cursor.execute(c)
+            v.extend(list(o))
+        db.commit()
+        return v
 
 # see http://www.devpicayune.com/entry/200609191448
 socket.setdefaulttimeout(10)  
@@ -342,7 +376,7 @@ class Client(object):
         >>> c = client(8100, username='foo', password='bar', address='localhost')
         >>> c = client(8100, 'foo', 'bar', 'localhost')
     """
-    def __init__(self, port=8100, username='username', password='password',
+    def __init__(self, port_or_dir=8100, username='username', password='password',
                  address="localhost"):
         """
         INPUTS:
@@ -353,11 +387,15 @@ class Client(object):
         - address -- string (default: 'localhost'); name of computer
           to connect to
         """
-        self.address = str(address)
-        self.port = port
-        self.server = xmlrpclib.Server('http://%s:%s@%s:%s'%
-                   (username, password, address, port),
-                                       allow_none=True)
+        if isinstance(port_or_dir, str):
+            # instead open local databases directory (no client/server).
+            self.server = LocalServer(port_or_dir)
+        else:
+            self.address = str(address)
+            self.port = int(port_or_dir)
+            self.server = xmlrpclib.Server('http://%s:%s@%s:%s'%
+                       (username, password, address, self.port),
+                                           allow_none=True)
 
     def __repr__(self):
         """
@@ -1227,7 +1265,7 @@ def _insert_statement(table, cols, on_conflict=None):
 
         >>> from nosqlite import _insert_statement
         >>> _insert_statement('table_name', ['col1', 'col2', 'col3'])
-        'INSERT INTO "table_name" ("col1","col2","col3") VALUES(?,?,?)'
+        'INSERT  INTO "table_name" ("col1","col2","col3") VALUES(?,?,?)'
     """
     conflict = 'OR %s'%on_conflict if on_conflict else ''
     cols = ['"%s"'%c for c in cols]
