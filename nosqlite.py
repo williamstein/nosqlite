@@ -710,13 +710,16 @@ class Collection(object):
     ###############################################################
     # Inserting documents: one at a time or in a batch
     ###############################################################
-    def insert(self, d=None, coerce=True, **kwds):
+    def insert(self, d=None, coerce=True, on_conflict=None, **kwds):
         """
         Insert a document or list of documents into this collection.
         
         INPUT:
         - d -- dict (single document) or list of dict's
         - coerce -- bool (default: True); if True, coerce values
+        - on_conflict -- string (default: None); if given should be one of
+          'rollback', 'abort', 'fail', 'ignore', 'replace'
+          (see http://www.sqlite.org/lang_conflict.html).
         - kwds -- gets merged into d, providing a convenient shorthand
           for inserting a document.
 
@@ -793,12 +796,12 @@ class Collection(object):
             # group d into a list of sublists with constant keys.   Then each of
             # these get inserted using SQL's executemany.
             for v in _constant_key_grouping(d):
-                cmd = _insert_statement(self.name, v[0].keys())
+                cmd = _insert_statement(self.name, v[0].keys(), on_conflict)
                 self.database(cmd, [x.values() for x in v], many=True, coerce=coerce)
             
         else:
             # individual insert
-            self.database(_insert_statement(self.name, d.keys()), d.values(), coerce=coerce)
+            self.database(_insert_statement(self.name, d.keys(), on_conflict), d.values(), coerce=coerce)
 
 
     ###############################################################
@@ -1004,6 +1007,14 @@ class Collection(object):
         if len(kwds) == 0:
             raise ValueError, "must specify some keys"
         cols, index_name = self._index_pattern(kwds)
+        current_cols = self.columns()
+        new_cols = [c for c in sorted(kwds.keys()) if c not in current_cols]
+        if new_cols:
+            if not current_cols:
+                self._create(new_cols)
+            else:
+                self._add_columns(new_cols)
+                
         cmd = "CREATE %s INDEX IF NOT EXISTS %s ON %s(%s)"%(
             'UNIQUE' if unique else '', index_name, self.name, cols)
         self.database(cmd)
@@ -1203,7 +1214,7 @@ class Collection(object):
             cmd = cmd[:i] + 'OFFSET %s'%offset
         
 
-def _insert_statement(table, cols):
+def _insert_statement(table, cols, on_conflict=None):
     """
     Return SQLite INSERT statement template for inserting the columns
     into the given table.
@@ -1218,8 +1229,9 @@ def _insert_statement(table, cols):
         >>> _insert_statement('table_name', ['col1', 'col2', 'col3'])
         'INSERT INTO "table_name" ("col1","col2","col3") VALUES(?,?,?)'
     """
+    conflict = 'OR %s'%on_conflict if on_conflict else ''
     cols = ['"%s"'%c for c in cols]
-    return 'INSERT INTO "%s" (%s) VALUES(%s)'%(table, ','.join(cols), ','.join(['?']*len(cols)))
+    return 'INSERT %s INTO "%s" (%s) VALUES(%s)'%(conflict, table, ','.join(cols), ','.join(['?']*len(cols)))
 
 def _constant_key_grouping(d):
     """
