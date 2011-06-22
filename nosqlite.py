@@ -380,7 +380,8 @@ class Client(object):
                  address="localhost"):
         """
         INPUTS:
-        - port -- int (default: 8100); port to connect to
+        - port -- int or string (default: 8100); port to connect to or a string that
+          instead uses a new local server served out of that directory
         - username -- string (default: 'username')
         - password -- string (default: 'password'); you likely have to
           change this
@@ -534,7 +535,7 @@ class Client(object):
             >>> c._coerce_back_(z)
             [1, 2]
         """
-        if isinstance(x, str) and x.startswith('__pickle'):
+        if isinstance(x, (str, unicode)) and x.startswith('__pickle'):
             return cPickle.loads(zlib.decompress(base64.b64decode(x[8:])))
         return x
 
