@@ -522,6 +522,8 @@ class Client(object):
             x = int(x)
         elif is_RealNumber(x) and x.prec()==53:
             return float(x)
+        elif isinstance(x, unicode):
+            return str(x)
         else:
             x = '__pickle' + base64.b64encode(zlib.compress(cPickle.dumps(x, 2)))
         return x
