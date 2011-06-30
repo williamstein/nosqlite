@@ -1222,7 +1222,7 @@ class Collection(object):
         return self.find()
 
     def find(self, query='', fields=None, batch_size=50,
-             _rowid=False, limit=None, offset=0, **kwds):
+             order_by=None, _rowid=False, limit=None, offset=0, **kwds):
         """
         Return iterator over all documents that match the given query.
 
@@ -1232,7 +1232,7 @@ class Collection(object):
             >>>         
         """
         cmd = self._find_cmd(query=query, fields=fields, batch_size=batch_size,
-                             _rowid=_rowid,
+                             _rowid=_rowid, order_by=order_by,
                              limit=limit, offset=offset, **kwds)
         convert = self.database.client._coerce_back_
         while True:
