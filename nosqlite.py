@@ -1177,8 +1177,8 @@ class Collection(object):
             >>> 
         """        
         cmd = 'SELECT rowid,' if _rowid else 'SELECT '
-        cmd += 'COUNT(*) ' if _count else ' * '
         if fields is None:
+            cmd += 'COUNT(*) ' if _count else ' * '
             cmd += ' FROM "%s"'%self.name
         else:
             if isinstance(fields, str):
@@ -1224,7 +1224,7 @@ class Collection(object):
     def find(self, query='', fields=None, batch_size=50,
              _rowid=False, limit=None, offset=0, **kwds):
         """
-        Return iteratoe over all documents that match the given query.
+        Return iterator over all documents that match the given query.
 
 
         EXAMPLES::
