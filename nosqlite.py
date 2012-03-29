@@ -121,6 +121,10 @@ class Server(object):
         - auto_run -- bool (default: True); if True, start the server
           upon creation of the Server object.
         """
+        # check for a common mistake
+        if 'http://' in username or 'http://' in password or 'http://' in address \
+           or 'http://' in directory:
+            raise ValueError, 'input contains "http://": please read the documentation'
         self.pid = 0
         self.test = self.__class__._test_mode
         if self.test:
@@ -388,6 +392,10 @@ class Client(object):
         - address -- string (default: 'localhost'); name of computer
           to connect to
         """
+        # check for a common mistake
+        if 'http://' in port_or_dir or 'http://' in username or 'http://' in password or 'http://' in address:
+            raise ValueError, 'input contains "http://": please read the documentation'
+        
         if isinstance(port_or_dir, str):
             # instead open local databases directory (no client/server).
             self.server = LocalServer(port_or_dir)
@@ -670,6 +678,9 @@ class Collection(object):
         """
         self.database = database
         self.name = str(name)
+
+    def __call__(self, *args, **kwds):
+        return self.database(*args, **kwds)
 
     def __repr__(self):
         """
@@ -1018,6 +1029,9 @@ class Collection(object):
             >>> 
         """
         if not query and len(kwds) == 0:
+            if len(self._columns()) == 0:
+                # nothing to do, since table wasn't created yet.
+                return
             # just drop the table
             cmd = 'DROP TABLE "%s"'%self.name
         else:
