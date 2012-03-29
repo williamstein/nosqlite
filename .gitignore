@@ -1,4 +1,4 @@
-~
+*~
 nosqlite.egg-info
 dist
-.pyc
+*.pyc
