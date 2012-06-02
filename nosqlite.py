@@ -249,10 +249,13 @@ class Server(object):
                     cmds = [cmds]
             v = []
             for c in cmds:
-                if isinstance(c, tuple):
-                    o = cursor.executemany(*c) if many else cursor.execute(*c)
-                else:
-                    o = cursor.execute(c)
+                try:
+                    if isinstance(c, tuple):
+                        o = cursor.executemany(*c) if many else cursor.execute(*c)
+                    else:
+                        o = cursor.execute(c)
+                except sqlite3.OperationalError, e:
+                    raise RuntimeError("%s" % e)
                 v.extend(list(o))
             db.commit()
             return v
@@ -348,10 +351,13 @@ class LocalServer(object):
                 cmds = [cmds]
         v = []
         for c in cmds:
-            if isinstance(c, tuple):
-                o = cursor.executemany(*c) if many else cursor.execute(*c)
-            else:
-                o = cursor.execute(c)
+            try:
+                if isinstance(c, tuple):
+                    o = cursor.executemany(*c) if many else cursor.execute(*c)
+                else:
+                    o = cursor.execute(c)
+            except sqlite3.OperationalError, e:
+                raise RuntimeError("%s" % e)
             v.extend(list(o))
         db.commit()
         return v
