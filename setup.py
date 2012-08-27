@@ -8,5 +8,6 @@ setup(
     author_email = "wstein@gmail.com",
     url = "http://code.google.com/p/nosqlite/",
     license = "Modified BSD",
-    platforms = ["any"]
+    platforms = ["any"],
+    py_modules = ['nosqlite'],
 )    
