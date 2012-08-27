@@ -532,6 +532,8 @@ class Client(object):
             x = int(x)
         elif isinstance(x, (str, int, long, float)):
             pass
+        elif x is None:
+            pass
         elif is_Integer(x) and x.nbits()<32:
             x = int(x)
         elif is_RealNumber(x) and x.prec()==53:
