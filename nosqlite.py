@@ -399,7 +399,7 @@ class Client(object):
           to connect to
         """
         # check for a common mistake
-        if 'http://' in port_or_dir or 'http://' in username or 'http://' in password or 'http://' in address:
+        if 'http://' in str(port_or_dir) or 'http://' in username or 'http://' in password or 'http://' in address:
             raise ValueError, 'input contains "http://": please read the documentation'
         
         if isinstance(port_or_dir, str):
